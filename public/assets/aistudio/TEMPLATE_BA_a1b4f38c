@@ -1,0 +1,64 @@
+﻿BERITA ACARA PEMBAYARAN PNBP TUNAI
+Nomor: {{Nomor_BA}}
+
+
+Pada hari ini, {{Hari}}, tanggal {{Tanggal_Teks}} bulan {{Bulan_Teks}} tahun {{Tahun}} pukul {{Pukul_BA}} waktu setempat, bertempat di {{Lokasi}}, kami yang bertanda tangan di bawah ini:
+
+
+Nama                      : {{Nama_Petugas}}
+NIP                         : {{NIP_Petugas}}
+Jabatan                    : {{Jabatan_Petugas}}
+(Selanjutnya disebut sebagai PIHAK PERTAMA)
+
+
+Nama                                : {{Nama_Wajib_Bayar}}
+NIK                             : {{NIK_Wajib_Bayar}}
+Nomor HP (WA)        : {{No_HP}}
+Alamat                 : {{Alamat_Instansi}}
+(Selanjutnya disebut sebagai PIHAK KEDUA)
+
+
+Dengan ini menerangkan hal-hal sebagai berikut:
+1. Telah terjadi gangguan teknis pada sistem layanan pembayaran elektronik sejak pukul {{Jam_Gangguan}} waktu setempat sehingga pembayaran non-tunai tidak dapat diproses.
+2. Demi kelancaran pelayanan publik, PIHAK KEDUA menyerahkan pembayaran Penerimaan Negara Bukan Pajak (PNBP) secara tunai kepada PIHAK PERTAMA, dan PIHAK PERTAMA telah menerima uang tunai tersebut dengan rincian:
+   • Jenis Layanan / PNBP         : {{Jenis_Layanan}}
+   • Rincian Layanan                : {{Rincian_Layanan}}
+   • Nominal Diterima               : Rp {{Nominal_Angka}},-
+   • Terbilang                              : {{Terbilang}}
+3. PIHAK PERTAMA berkewajiban menyimpan uang tunai tersebut dalam brankas bendahara dan segera membuatkan kode billing serta menyetorkannya ke Kas Negara melalui Bank/Pos Persepsi paling lambat 1 (satu) hari kerja setelah sistem kembali normal.
+4. Bukti Penerimaan Negara (BPN) / Nomor Transaksi Penerimaan Negara (NTPN) yang terbit setelah penyetoran akan diserahkan atau dikirimkan kepada PIHAK KEDUA sebagai bukti setor yang sah.
+
+
+Demikian Berita Acara ini dibuat dengan sebenar-benarnya dalam rangkap 2 (dua) untuk dipergunakan sebagaimana mestinya sebagai bahan pertanggungjawaban administrasi dan keuangan.
+
+
+          Kota_TTD}}, {{Tanggal_TTD}}
+PIHAK KEDUA
+(Wajib Bayar)
+
+
+
+
+{{TTD_Wajib_Bayar}}
+
+
+
+
+
+
+{{Nama_Wajib_Bayar}} 
+	PIHAK PERTAMA
+(Petugas BKK Kelas I Kendari)
+
+
+
+
+{{TTD_Petugas}}
+
+
+
+
+
+
+ {{Nama_Petugas}}
+ NIP. {{NIP_Petugas}}

@@ -1,0 +1,6 @@
+{
+  "name": "Berita Acara & Rekap PDF Otomatis",
+  "description": "Otomasi Google Sheets untuk validasi Admin, cetak formulir Berita Acara dan Rekapitulasi Bulanan PDF dari data Glide App secara gratis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
