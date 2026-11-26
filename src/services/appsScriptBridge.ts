@@ -17,6 +17,9 @@ interface BridgeGetResponse {
 interface BridgePostResponse {
   ok?: boolean;
   error?: string;
+  assignedNomorBA?: string;
+  buktiSetorUrl?: string;
+  deduplicated?: boolean;
 }
 
 export async function fetchViaAppsScript(bridgeUrl: string): Promise<{
@@ -49,7 +52,7 @@ export async function fetchViaAppsScript(bridgeUrl: string): Promise<{
 async function postToAppsScript(
   bridgeUrl: string,
   payload: Record<string, unknown>
-): Promise<void> {
+): Promise<BridgePostResponse> {
   const res = await fetch(bridgeUrl, {
     method: 'POST',
     headers: {
@@ -66,12 +69,14 @@ async function postToAppsScript(
     if (parsed.ok === false) {
       throw new Error(parsed.error || 'Operasi Apps Script ditolak.');
     }
+    return parsed;
   } catch (err) {
     if (err instanceof Error && err.message !== 'Unexpected end of JSON input') {
       if (!(err instanceof SyntaxError)) {
         throw err;
       }
     }
+    return {};
   }
 }
 
@@ -85,12 +90,18 @@ export async function appendViaAppsScript(
     | 'tanggalValidasi'
     | 'catatanAdmin'
     | 'linkPdfBA'
-  >
-): Promise<void> {
-  await postToAppsScript(bridgeUrl, {
+  >,
+  autoAssignSequence = true
+): Promise<{ assignedNomorBA?: string; deduplicated?: boolean }> {
+  const resp = await postToAppsScript(bridgeUrl, {
     action: 'append',
     entry,
+    autoAssignSequence,
   });
+  return {
+    assignedNomorBA: resp.assignedNomorBA,
+    deduplicated: resp.deduplicated,
+  };
 }
 
 export async function validateViaAppsScript(
@@ -98,11 +109,13 @@ export async function validateViaAppsScript(
   rowNumber: number,
   status: ValidationStatus,
   validatorName: string,
-  notes: string
+  notes: string,
+  idBA?: string
 ): Promise<void> {
   await postToAppsScript(bridgeUrl, {
     action: 'validate',
     rowNumber,
+    idBA,
     status,
     validatorName,
     notes,
@@ -125,6 +138,7 @@ export async function saveBuktiSetorViaAppsScript(
   bridgeUrl: string,
   payload: {
     rowNumber: number;
+    idBA?: string;
     kodeBilling: string;
     kodeNtpn: string;
     buktiSetorUrl: string;

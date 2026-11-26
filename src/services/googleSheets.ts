@@ -831,6 +831,37 @@ export async function saveSecurityConfigToSheet(
   );
 }
 
+async function resolveRowNumberByIdBA(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetName: string,
+  fallbackRowNumber: number,
+  idBA?: string
+): Promise<number> {
+  const wanted = String(idBA || '').trim();
+  if (!wanted) return fallbackRowNumber;
+
+  interface ValuesResp {
+    values?: string[][];
+  }
+  const range = encodeURIComponent(`${sheetName}!A2:A2000`);
+  const data = await googleFetch<ValuesResp>(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      spreadsheetId
+    )}/values/${range}`,
+    accessToken
+  );
+  const rows = data.values || [];
+  for (let i = 0; i < rows.length; i++) {
+    if (String(rows[i]?.[0] || '').trim() === wanted) {
+      return i + 2;
+    }
+  }
+  throw new Error(
+    'Data Berita Acara tidak ditemukan (kemungkinan sudah dihapus oleh Super Admin).'
+  );
+}
+
 export async function updateRowValidation(
   accessToken: string,
   spreadsheetId: string,
@@ -838,10 +869,18 @@ export async function updateRowValidation(
   rowNumber: number,
   status: ValidationStatus,
   validatorName: string,
-  notes: string
+  notes: string,
+  idBA?: string
 ): Promise<void> {
+  const targetRow = await resolveRowNumberByIdBA(
+    accessToken,
+    spreadsheetId,
+    sheetName,
+    rowNumber,
+    idBA
+  );
   const today = new Date().toISOString().slice(0, 10);
-  const range = encodeURIComponent(`${sheetName}!Z${rowNumber}:AC${rowNumber}`);
+  const range = encodeURIComponent(`${sheetName}!Z${targetRow}:AC${targetRow}`);
 
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
@@ -870,9 +909,17 @@ export async function updateRowPdfLink(
   spreadsheetId: string,
   sheetName: string,
   rowNumber: number,
-  pdfUrl: string
+  pdfUrl: string,
+  idBA?: string
 ): Promise<void> {
-  const range = encodeURIComponent(`${sheetName}!AD${rowNumber}`);
+  const targetRow = await resolveRowNumberByIdBA(
+    accessToken,
+    spreadsheetId,
+    sheetName,
+    rowNumber,
+    idBA
+  );
+  const range = encodeURIComponent(`${sheetName}!AD${targetRow}`);
 
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
@@ -897,9 +944,17 @@ export async function updateRowBuktiSetor(
   kodeBilling: string,
   kodeNtpn: string,
   buktiSetorUrl: string,
-  buktiSetorNama: string
+  buktiSetorNama: string,
+  idBA?: string
 ): Promise<void> {
-  const range = encodeURIComponent(`${sheetName}!AE${rowNumber}:AH${rowNumber}`);
+  const targetRow = await resolveRowNumberByIdBA(
+    accessToken,
+    spreadsheetId,
+    sheetName,
+    rowNumber,
+    idBA
+  );
+  const range = encodeURIComponent(`${sheetName}!AE${targetRow}:AH${targetRow}`);
 
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
@@ -927,9 +982,17 @@ export async function deleteBeritaAcaraRow(
   accessToken: string,
   spreadsheetId: string,
   sheetName: string,
-  rowNumber: number
+  rowNumber: number,
+  idBA?: string
 ): Promise<void> {
-  if (rowNumber < 2) {
+  const targetRow = await resolveRowNumberByIdBA(
+    accessToken,
+    spreadsheetId,
+    sheetName,
+    rowNumber,
+    idBA
+  );
+  if (targetRow < 2) {
     throw new Error('Nomor baris tidak valid untuk dihapus.');
   }
   interface MetaResp {
@@ -961,8 +1024,8 @@ export async function deleteBeritaAcaraRow(
               range: {
                 sheetId: target.properties.sheetId,
                 dimension: 'ROWS',
-                startIndex: rowNumber - 1,
-                endIndex: rowNumber,
+                startIndex: targetRow - 1,
+                endIndex: targetRow,
               },
             },
           },
@@ -984,13 +1047,40 @@ export async function appendBeritaAcaraRow(
     | 'tanggalValidasi'
     | 'catatanAdmin'
     | 'linkPdfBA'
-  >
-): Promise<void> {
+  >,
+  options?: {
+    agency?: AgencySettings;
+    autoAssignSequence?: boolean;
+  }
+): Promise<string> {
+  let finalNomorBA = entry.nomorBA;
+  try {
+    const freshEntries = await fetchSheetEntries(accessToken, spreadsheetId, sheetName);
+    const existing = freshEntries.find(
+      (item) => item.idBA.trim() === entry.idBA.trim()
+    );
+    if (existing) {
+      return existing.nomorBA;
+    }
+    if (
+      options?.agency &&
+      (options.autoAssignSequence || options.agency.kunciNomorUrutUntukUser)
+    ) {
+      finalNomorBA = computeNextBeritaAcaraInfo(
+        freshEntries,
+        options.agency,
+        entry.tanggalInput
+      ).formattedNomorBA;
+    }
+  } catch {
+    // Fallback to entry.nomorBA if pre-check read fails
+  }
+
   const range = encodeURIComponent(`${sheetName}!A:AH`);
   const row = [
     entry.idBA,
     entry.tanggalInput,
-    entry.nomorBA,
+    finalNomorBA,
     entry.hari,
     entry.tanggalTeks,
     entry.bulanTeks,
@@ -1037,6 +1127,8 @@ export async function appendBeritaAcaraRow(
       }),
     }
   );
+
+  return finalNomorBA;
 }
 
 export async function uploadDocumentToDrive(

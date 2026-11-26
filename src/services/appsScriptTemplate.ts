@@ -134,7 +134,98 @@ function doGet() {
   }
 }
 
+function resolveTargetRow_(sheet, rowNumber, idBA) {
+  let targetRow = Number(rowNumber);
+  if (idBA && sheet.getLastRow() > 1) {
+    const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+    const wanted = String(idBA).trim();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0] || '').trim() === wanted) {
+        return i + 2;
+      }
+    }
+    throw new Error('Data Berita Acara tidak ditemukan (kemungkinan sudah dihapus oleh Super Admin).');
+  }
+  if (!targetRow || targetRow < 2 || targetRow > sheet.getLastRow()) {
+    throw new Error('Baris data tidak valid atau sudah berubah.');
+  }
+  return targetRow;
+}
+
+function readSettingsMap_(ss) {
+  const map = {};
+  const settingsSheet = ss.getSheetByName(CONFIG.SETTINGS_SHEET);
+  if (settingsSheet && settingsSheet.getLastRow() > 1) {
+    const sRows = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 2).getDisplayValues();
+    sRows.forEach((sr) => {
+      if (sr[0]) map[String(sr[0]).trim()] = String(sr[1] || '').trim();
+    });
+  }
+  return map;
+}
+
+function extractSeq_(nomorBA) {
+  const m = String(nomorBA || '').trim().match(/^(\\d+)/);
+  return m ? (parseInt(m[1], 10) || 0) : 0;
+}
+
+function computeServerNomorBA_(sheet, map, tanggalInput, fallbackNomorBA) {
+  const safeDate = tanggalInput && /^\\d{4}-\\d{2}-\\d{2}$/.test(String(tanggalInput))
+    ? String(tanggalInput)
+    : Utilities.formatDate(new Date(), 'Asia/Makassar', 'yyyy-MM-dd');
+  const yyyy = safeDate.slice(0, 4);
+  const mm = safeDate.slice(5, 7);
+  const resetMode = map.resetNomorMode || 'tahunan';
+  const startSeq = Math.max(1, Number(map.nomorUrutMulai) || 1);
+  const digits = Math.min(6, Math.max(2, Number(map.digitNomorUrut) || 3));
+  const prefix = (map.kodeSuratPrefix || 'BA-PNBP/BKK-KDI').trim();
+
+  const usedSeqs = {};
+  const usedNomors = {};
+  if (sheet.getLastRow() > 1) {
+    const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getDisplayValues();
+    for (let i = 0; i < rows.length; i++) {
+      const tgl = String(rows[i][1] || '');
+      const nom = String(rows[i][2] || '').trim();
+      if (nom) usedNomors[nom] = true;
+      const inScope =
+        resetMode === 'bulanan' ? tgl.indexOf(yyyy + '-' + mm) === 0
+        : resetMode === 'tahunan' ? tgl.indexOf(yyyy) === 0
+        : true;
+      if (inScope) {
+        const seq = extractSeq_(nom);
+        if (seq > 0) usedSeqs[seq] = true;
+      }
+    }
+  }
+
+  let nextSeq = startSeq;
+  while (usedSeqs[nextSeq]) {
+    nextSeq++;
+  }
+  let candidate = String(nextSeq);
+  while (candidate.length < digits) candidate = '0' + candidate;
+  let formatted = candidate + '/' + prefix + '/' + mm + '/' + yyyy;
+  while (usedNomors[formatted]) {
+    nextSeq++;
+    candidate = String(nextSeq);
+    while (candidate.length < digits) candidate = '0' + candidate;
+    formatted = candidate + '/' + prefix + '/' + mm + '/' + yyyy;
+  }
+  return formatted || fallbackNomorBA;
+}
+
 function doPost(e) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (lockErr) {
+    return jsonOut({
+      ok: false,
+      error: 'Server sedang sibuk memproses antrean petugas lain. Silakan klik simpan kembali.',
+    });
+  }
+
   try {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -143,8 +234,30 @@ function doPost(e) {
       const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
       if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
       const d = body.entry;
+
+      // Cegah duplikasi jika tombol ditekan ulang / retry jaringan dengan idBA sama
+      if (d.idBA && sheet.getLastRow() > 1) {
+        const existingRows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getDisplayValues();
+        for (let i = 0; i < existingRows.length; i++) {
+          if (String(existingRows[i][0] || '').trim() === String(d.idBA).trim()) {
+            return jsonOut({
+              ok: true,
+              assignedNomorBA: String(existingRows[i][2] || d.nomorBA),
+              deduplicated: true,
+            });
+          }
+        }
+      }
+
+      const map = readSettingsMap_(ss);
+      const lockSeqForUser = map.kunciNomorUrutUntukUser === 'false' ? false : true;
+      let finalNomorBA = d.nomorBA;
+      if (lockSeqForUser || body.autoAssignSequence) {
+        finalNomorBA = computeServerNomorBA_(sheet, map, d.tanggalInput, d.nomorBA);
+      }
+
       sheet.appendRow([
-        d.idBA, d.tanggalInput, d.nomorBA, d.hari, d.tanggalTeks, d.bulanTeks,
+        d.idBA, d.tanggalInput, finalNomorBA, d.hari, d.tanggalTeks, d.bulanTeks,
         d.tahun, d.pukulBA, d.lokasi, d.namaPetugas, "'" + d.nipPetugas, d.jabatanPetugas,
         d.namaWajibBayar, "'" + (d.nikWajibBayar || '-'), "'" + (d.noHP || '-'),
         d.alamatInstansi, d.jamGangguan, d.jenisLayanan, d.rincianLayanan,
@@ -153,14 +266,23 @@ function doPost(e) {
         d.kodeBilling ? "'" + d.kodeBilling : '', d.kodeNtpn ? "'" + d.kodeNtpn : '',
         d.buktiSetorUrl || '', d.buktiSetorNama || '',
       ]);
-      return jsonOut({ ok: true });
+      SpreadsheetApp.flush();
+      return jsonOut({ ok: true, assignedNomorBA: finalNomorBA });
     }
 
     if (body.action === 'saveBuktiSetor') {
       const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
       if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
-      const row = Number(body.rowNumber);
-      if (!row || row < 2) throw new Error('Nomor baris tidak valid.');
+      const row = resolveTargetRow_(sheet, body.rowNumber, body.idBA);
+
+      const existingBukti = sheet.getRange(row, 31, 1, 3).getDisplayValues()[0];
+      if (
+        String(existingBukti[0] || '').trim() &&
+        String(existingBukti[1] || '').trim() &&
+        String(existingBukti[2] || '').trim()
+      ) {
+        throw new Error('Bukti setor untuk Berita Acara ini sudah lengkap dan terkunci oleh input sebelumnya.');
+      }
 
       let fileUrl = body.buktiSetorUrl || '';
       const fileName = body.buktiSetorNama || '';
@@ -180,32 +302,23 @@ function doPost(e) {
         fileUrl,
         fileName,
       ]]);
+      SpreadsheetApp.flush();
       return jsonOut({ ok: true, buktiSetorUrl: fileUrl });
     }
 
     if (body.action === 'delete') {
       const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
       if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
-      let targetRow = Number(body.rowNumber);
-      if (body.idBA && sheet.getLastRow() > 1) {
-        const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
-        for (let i = 0; i < ids.length; i++) {
-          if (String(ids[i][0]).trim() === String(body.idBA).trim()) {
-            targetRow = i + 2;
-            break;
-          }
-        }
-      }
-      if (!targetRow || targetRow < 2) throw new Error('Baris data tidak ditemukan.');
+      const targetRow = resolveTargetRow_(sheet, body.rowNumber, body.idBA);
       sheet.deleteRow(targetRow);
+      SpreadsheetApp.flush();
       return jsonOut({ ok: true });
     }
 
     if (body.action === 'validate') {
       const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
       if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
-      const row = Number(body.rowNumber);
-      if (!row || row < 2) throw new Error('Nomor baris tidak valid.');
+      const row = resolveTargetRow_(sheet, body.rowNumber, body.idBA);
       const status = body.status || 'Menunggu Validasi';
       const today = status === 'Menunggu Validasi'
         ? ''
@@ -216,6 +329,7 @@ function doPost(e) {
         today,
         body.notes || '',
       ]]);
+      SpreadsheetApp.flush();
       return jsonOut({ ok: true });
     }
 
@@ -247,12 +361,17 @@ function doPost(e) {
         ['superAdminPwdUpdatedAt', (sec.superadmin && sec.superadmin.updatedAt) || ''],
       ];
       sSheet.getRange(1, 1, rows.length, 2).setValues(rows);
+      SpreadsheetApp.flush();
       return jsonOut({ ok: true });
     }
 
     throw new Error('Aksi tidak dikenali.');
   } catch (err) {
     return jsonOut({ ok: false, error: err.message });
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (ignore) {}
   }
 }
 

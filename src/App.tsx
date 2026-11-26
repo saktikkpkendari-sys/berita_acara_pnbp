@@ -27,6 +27,7 @@ import {
 import { googleSignIn, initAuth, logout } from './services/googleAuth';
 import {
   appendBeritaAcaraRow,
+  computeNextBeritaAcaraInfo,
   createAutomatedSpreadsheet,
   DEFAULT_AGENCY_SETTINGS,
   DEFAULT_VALIDATOR_NAME,
@@ -249,6 +250,42 @@ export default function App() {
       void loadBridgeData(bridgeUrl);
     }
   }, [accessToken, bridgeUrl, loadBridgeData]);
+
+  // Sinkronisasi otomatis antar-petugas saat berpindah menu atau kembali ke jendela aplikasi (throttle 12 detik)
+  const lastSyncRef = React.useRef<number>(0);
+  useEffect(() => {
+    if (storageMode === 'local') return;
+
+    const silentSync = async () => {
+      const now = Date.now();
+      if (now - lastSyncRef.current < 12000) return;
+      lastSyncRef.current = now;
+      try {
+        if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+          const fresh = await fetchSheetEntries(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.activeDataSheet
+          );
+          setEntries(fresh);
+        } else if (storageMode === 'apps-script' && bridgeUrl) {
+          const result = await fetchViaAppsScript(bridgeUrl);
+          setEntries(result.entries);
+          setAgency(result.agency);
+          saveLocalAgencySettings(result.agency);
+        }
+      } catch {
+        // Silent background sync: abaikan jika koneksi sementara terputus
+      }
+    };
+
+    void silentSync();
+    const onFocus = () => {
+      void silentSync();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [activeTab, storageMode, accessToken, spreadsheet, bridgeUrl]);
 
   const loadSpreadsheetData = useCallback(
     async (token: string, info: SpreadsheetInfo) => {
@@ -519,34 +556,64 @@ export default function App() {
       ],
       confirmLabel: 'Simpan Berita Acara',
       onConfirm: async () => {
+        let finalNomorBA = payload.nomorBA;
+
         if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
-          await appendBeritaAcaraRow(
+          finalNomorBA = await appendBeritaAcaraRow(
             accessToken,
             spreadsheet.spreadsheetId,
             spreadsheet.activeDataSheet,
-            payload
+            payload,
+            {
+              agency,
+              autoAssignSequence: agency.kunciNomorUrutUntukUser,
+            }
           );
           await loadSpreadsheetData(accessToken, spreadsheet);
         } else if (storageMode === 'apps-script' && bridgeUrl) {
-          await appendViaAppsScript(bridgeUrl, payload);
+          const res = await appendViaAppsScript(
+            bridgeUrl,
+            payload,
+            agency.kunciNomorUrutUntukUser
+          );
+          if (res.assignedNomorBA) {
+            finalNomorBA = res.assignedNomorBA;
+          }
           await loadBridgeData(bridgeUrl);
         } else {
           const current = loadLocalEntries();
-          const newItem: BeritaAcaraPNBP = {
-            ...payload,
-            rowNumber: current.length + 2,
-            statusValidasi: 'Menunggu Validasi',
-            validatorAdmin: '',
-            tanggalValidasi: '',
-            catatanAdmin: '',
-            linkPdfBA: '',
-          };
-          const next = [newItem, ...current];
-          saveLocalEntries(next);
-          setEntries(next);
+          const alreadyExists = current.find(
+            (item) => item.idBA.trim() === payload.idBA.trim()
+          );
+          if (alreadyExists) {
+            finalNomorBA = alreadyExists.nomorBA;
+          } else {
+            if (agency.kunciNomorUrutUntukUser) {
+              finalNomorBA = computeNextBeritaAcaraInfo(
+                current,
+                agency,
+                payload.tanggalInput
+              ).formattedNomorBA;
+            }
+            const newItem: BeritaAcaraPNBP = {
+              ...payload,
+              nomorBA: finalNomorBA,
+              rowNumber: current.length + 2,
+              statusValidasi: 'Menunggu Validasi',
+              validatorAdmin: '',
+              tanggalValidasi: '',
+              catatanAdmin: '',
+              linkPdfBA: '',
+            };
+            const next = [newItem, ...current];
+            saveLocalEntries(next);
+            setEntries(next);
+          }
         }
         showToast(
-          `Berita Acara ${payload.nomorBA} tersimpan. Menunggu validasi Admin.`
+          finalNomorBA !== payload.nomorBA
+            ? `Berita Acara tersimpan dengan Nomor ${finalNomorBA} (otomatis menyesuaikan antrean petugas lain). Menunggu validasi Admin.`
+            : `Berita Acara ${finalNomorBA} tersimpan. Menunggu validasi Admin.`
         );
         setActiveTab('cetak');
       },
@@ -589,7 +656,8 @@ export default function App() {
             entry.rowNumber,
             decision,
             validatorName,
-            noteText
+            noteText,
+            entry.idBA
           );
           await loadSpreadsheetData(accessToken, spreadsheet);
         } else if (storageMode === 'apps-script' && bridgeUrl) {
@@ -598,7 +666,8 @@ export default function App() {
             entry.rowNumber,
             decision,
             validatorName,
-            noteText
+            noteText,
+            entry.idBA
           );
           await loadBridgeData(bridgeUrl);
         } else {
@@ -644,7 +713,8 @@ export default function App() {
             entry.rowNumber,
             'Menunggu Validasi',
             '',
-            ''
+            '',
+            entry.idBA
           );
           await loadSpreadsheetData(accessToken, spreadsheet);
         } else if (storageMode === 'apps-script' && bridgeUrl) {
@@ -653,7 +723,8 @@ export default function App() {
             entry.rowNumber,
             'Menunggu Validasi',
             '',
-            ''
+            '',
+            entry.idBA
           );
           await loadBridgeData(bridgeUrl);
         } else {
@@ -727,7 +798,8 @@ export default function App() {
             payload.kodeBilling,
             payload.kodeNtpn,
             nextUrl,
-            nextName
+            nextName,
+            entry.idBA
           );
           await loadSpreadsheetData(accessToken, spreadsheet);
         } else if (storageMode === 'apps-script' && bridgeUrl) {
@@ -741,6 +813,7 @@ export default function App() {
           }
           await saveBuktiSetorViaAppsScript(bridgeUrl, {
             rowNumber: entry.rowNumber,
+            idBA: entry.idBA,
             kodeBilling: payload.kodeBilling,
             kodeNtpn: payload.kodeNtpn,
             buktiSetorUrl: nextUrl,
@@ -798,7 +871,8 @@ export default function App() {
             accessToken,
             spreadsheet.spreadsheetId,
             spreadsheet.activeDataSheet,
-            entry.rowNumber
+            entry.rowNumber,
+            entry.idBA
           );
           await loadSpreadsheetData(accessToken, spreadsheet);
         } else if (storageMode === 'apps-script' && bridgeUrl) {
@@ -843,7 +917,8 @@ export default function App() {
           spreadsheet.spreadsheetId,
           spreadsheet.activeDataSheet,
           entry.rowNumber,
-          uploaded.webViewLink
+          uploaded.webViewLink,
+          entry.idBA
         );
         await loadSpreadsheetData(accessToken, spreadsheet);
         setPreviewEntry((prev) =>
