@@ -2,6 +2,8 @@ import { REFERENSI_PETUGAS } from '../data/petugasList';
 import {
   AgencySettings,
   BeritaAcaraPNBP,
+  RoleSecurityConfig,
+  SequenceResetMode,
   SpreadsheetInfo,
   ValidationStatus,
 } from '../types';
@@ -9,14 +11,92 @@ import {
 export const DEFAULT_AGENCY_SETTINGS: AgencySettings = {
   namaInstansi: 'KEMENTERIAN KESEHATAN REPUBLIK INDONESIA',
   subUnit: 'BALAI KEKARANTINAAN KESEHATAN KELAS I KENDARI',
-  alamatInstansi: 'Jl. Jenderal Ahmad Yani No. 23, Kendari, Sulawesi Tenggara',
+  alamatInstansi:
+    'Jalan W.R. Supratman No.2, Kandai, Kendari, Sulawesi Tenggara 93127',
   kota: 'Kendari',
-  teleponEmail: 'Telp. (0401) 3121740 · bkk.kendari@kemkes.go.id',
+  teleponEmail: '(0401) 3121651 · https://bkkkendari.kemkes.go.id',
   namaPimpinan: 'NOVI HENDRI, SKM, M.Sc',
   jabatanPimpinan: 'Kepala Balai Kekarantinaan Kesehatan Kelas I Kendari',
   nipPimpinan: '197011151996031001',
   kodeSuratPrefix: 'BA-PNBP/BKK-KDI',
+  nomorUrutMulai: 1,
+  digitNomorUrut: 3,
+  resetNomorMode: 'tahunan',
+  kunciNomorUrutUntukUser: true,
 };
+
+export const DEFAULT_VALIDATOR_NAME =
+  'Bendahara Penerimaan BKK Kelas I Kendari';
+
+function normalizeResetMode(raw: string | undefined): SequenceResetMode {
+  if (raw === 'bulanan' || raw === 'lanjut' || raw === 'tahunan') return raw;
+  return 'tahunan';
+}
+
+export function extractSequenceFromNomorBA(nomorBA: string): number {
+  const match = String(nomorBA || '')
+    .trim()
+    .match(/^(\d+)/);
+  if (!match) return 0;
+  const num = Number.parseInt(match[1], 10);
+  return Number.isNaN(num) ? 0 : num;
+}
+
+export function computeNextBeritaAcaraInfo(
+  entries: BeritaAcaraPNBP[],
+  agency: AgencySettings,
+  tanggalInput: string
+): {
+  nextSequence: number;
+  formattedNomorBA: string;
+  highestExistingSeq: number;
+} {
+  const safeDate =
+    tanggalInput && /^\d{4}-\d{2}-\d{2}$/.test(tanggalInput)
+      ? tanggalInput
+      : new Date().toISOString().slice(0, 10);
+  const yyyy = safeDate.slice(0, 4);
+  const mm = safeDate.slice(5, 7);
+
+  const scopedEntries = entries.filter((item) => {
+    const tgl = String(item.tanggalInput || '');
+    if (agency.resetNomorMode === 'bulanan') {
+      return tgl.startsWith(`${yyyy}-${mm}`);
+    }
+    if (agency.resetNomorMode === 'tahunan') {
+      return tgl.startsWith(yyyy);
+    }
+    return true;
+  });
+
+  const usedSequences = new Set<number>();
+  let highestExistingSeq = 0;
+  for (const item of scopedEntries) {
+    const seq = extractSequenceFromNomorBA(item.nomorBA);
+    if (seq > 0) {
+      usedSequences.add(seq);
+      if (seq > highestExistingSeq) highestExistingSeq = seq;
+    }
+  }
+
+  // Fill deleted/vacant sequence gaps starting from nomorUrutMulai
+  const startSeq = Math.max(1, Number(agency.nomorUrutMulai) || 1);
+  let nextSequence = startSeq;
+  while (usedSequences.has(nextSequence)) {
+    nextSequence += 1;
+  }
+
+  const digits = Math.min(6, Math.max(2, Number(agency.digitNomorUrut) || 3));
+  const seqStr = String(nextSequence).padStart(digits, '0');
+  const prefix = (agency.kodeSuratPrefix || 'BA-PNBP/BKK-KDI').trim();
+  const formattedNomorBA = `${seqStr}/${prefix}/${mm}/${yyyy}`;
+
+  return {
+    nextSequence,
+    formattedNomorBA,
+    highestExistingSeq,
+  };
+}
 
 export const DATA_PNBP_HEADERS = [
   'ID_BA',                  // A (0)
@@ -49,6 +129,10 @@ export const DATA_PNBP_HEADERS = [
   'Tanggal_Validasi',       // AB (27)
   'Catatan_Admin',          // AC (28)
   'Link_PDF_BA',            // AD (29)
+  'Kode_Billing',           // AE (30)
+  'Kode_NTPN',              // AF (31)
+  'Bukti_Setor_URL',        // AG (32)
+  'Bukti_Setor_Nama',       // AH (33)
 ];
 
 export function extractSpreadsheetId(input: string): string {
@@ -145,9 +229,13 @@ function buildSamplePNBPRows(agency: AgencySettings): (string | number)[][] {
       '',
       '',
       'Disetujui',
-      agency.namaPimpinan,
+      DEFAULT_VALIDATOR_NAME,
       `${yyyy}-${mm}-05`,
       'Bukti setor & kode billing telah diverifikasi bendahara.',
+      '',
+      '820261105001234',
+      'NTPN-9F28A1C04B7D',
+      '',
       '',
     ],
     [
@@ -158,16 +246,16 @@ function buildSamplePNBPRows(agency: AgencySettings): (string | number)[][] {
       'dua belas',
       'November',
       yyyy,
-      '13:40',
+      '-',
       'Klinik Layanan Vaksinasi BKK Kendari',
       'dr. HERDA MARGARET SITURU',
       '198206202009122001',
       'Dokter Layanan Vaksinasi Internasional',
       'Siti Aminah',
-      '7471055408910002',
-      '085299887766',
+      '-',
+      '-',
       'Jl. Malik Raya No. 18, Kendari',
-      '13:10',
+      `${yyyy}-${mm}-12 13:10`,
       'Penerbitan Sertifikat Vaksinasi Internasional (ICV / e-ICV)',
       'Vaksinasi Meningitis Umrah & penerbitan buku ICV',
       305000,
@@ -177,6 +265,10 @@ function buildSamplePNBPRows(agency: AgencySettings): (string | number)[][] {
       '',
       '',
       'Menunggu Validasi',
+      '',
+      '',
+      '',
+      '',
       '',
       '',
       '',
@@ -302,6 +394,10 @@ export async function createAutomatedSpreadsheet(
     ['jabatanPimpinan', agency.jabatanPimpinan],
     ['nipPimpinan', `'${agency.nipPimpinan}`],
     ['kodeSuratPrefix', agency.kodeSuratPrefix],
+    ['nomorUrutMulai', String(agency.nomorUrutMulai || 1)],
+    ['digitNomorUrut', String(agency.digitNomorUrut || 3)],
+    ['resetNomorMode', agency.resetNomorMode || 'tahunan'],
+    ['kunciNomorUrutUntukUser', agency.kunciNomorUrutUntukUser ? 'true' : 'false'],
   ];
 
   await googleFetch(
@@ -471,7 +567,7 @@ export async function fetchSheetEntries(
     values?: string[][];
   }
 
-  const range = encodeURIComponent(`${sheetName}!A1:AD2000`);
+  const range = encodeURIComponent(`${sheetName}!A1:AH2000`);
   const data = await googleFetch<ValuesResp>(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
@@ -519,19 +615,23 @@ export async function fetchSheetEntries(
       tanggalValidasi: String(r[27] || ''),
       catatanAdmin: String(r[28] || ''),
       linkPdfBA: String(r[29] || ''),
+      kodeBilling: String(r[30] || ''),
+      kodeNtpn: String(r[31] || ''),
+      buktiSetorUrl: String(r[32] || ''),
+      buktiSetorNama: String(r[33] || ''),
     });
   }
 
   return entries;
 }
 
-export async function fetchAgencySettings(
+export async function fetchSheetSettingsMap(
   accessToken: string,
   spreadsheetId: string,
   sheetNames: string[]
-): Promise<AgencySettings> {
+): Promise<Record<string, string>> {
   if (!sheetNames.includes('Pengaturan_Instansi')) {
-    return DEFAULT_AGENCY_SETTINGS;
+    return {};
   }
 
   interface ValuesResp {
@@ -541,7 +641,7 @@ export async function fetchAgencySettings(
   const data = await googleFetch<ValuesResp>(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
-    )}/values/${encodeURIComponent('Pengaturan_Instansi!A1:B30')}`,
+    )}/values/${encodeURIComponent('Pengaturan_Instansi!A1:B40')}`,
     accessToken
   );
 
@@ -552,7 +652,12 @@ export async function fetchAgencySettings(
     const val = String(rows[i]?.[1] || '').trim();
     if (key) map[key] = val;
   }
+  return map;
+}
 
+export function extractAgencyFromMap(
+  map: Record<string, string>
+): AgencySettings {
   return {
     namaInstansi: map.namaInstansi || DEFAULT_AGENCY_SETTINGS.namaInstansi,
     subUnit: map.subUnit || DEFAULT_AGENCY_SETTINGS.subUnit,
@@ -566,14 +671,67 @@ export async function fetchAgencySettings(
     nipPimpinan: map.nipPimpinan || DEFAULT_AGENCY_SETTINGS.nipPimpinan,
     kodeSuratPrefix:
       map.kodeSuratPrefix || DEFAULT_AGENCY_SETTINGS.kodeSuratPrefix,
+    nomorUrutMulai:
+      Math.max(1, Number.parseInt(map.nomorUrutMulai || '', 10) || 1),
+    digitNomorUrut: Math.min(
+      6,
+      Math.max(2, Number.parseInt(map.digitNomorUrut || '', 10) || 3)
+    ),
+    resetNomorMode: normalizeResetMode(map.resetNomorMode),
+    kunciNomorUrutUntukUser:
+      map.kunciNomorUrutUntukUser === 'false' ? false : true,
   };
 }
 
-export async function saveAgencySettingsToSheet(
+export function extractSecurityFromMap(
+  map: Record<string, string>
+): RoleSecurityConfig {
+  const security: RoleSecurityConfig = {};
+  if (map.adminPwdSalt && map.adminPwdHash) {
+    security.admin = {
+      salt: map.adminPwdSalt,
+      hash: map.adminPwdHash,
+      updatedAt: map.adminPwdUpdatedAt || '',
+    };
+  }
+  if (map.superAdminPwdSalt && map.superAdminPwdHash) {
+    security.superadmin = {
+      salt: map.superAdminPwdSalt,
+      hash: map.superAdminPwdHash,
+      updatedAt: map.superAdminPwdUpdatedAt || '',
+    };
+  }
+  return security;
+}
+
+export async function fetchAgencySettings(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetNames: string[]
+): Promise<AgencySettings> {
+  const map = await fetchSheetSettingsMap(accessToken, spreadsheetId, sheetNames);
+  return extractAgencyFromMap(map);
+}
+
+export async function fetchSheetSecurityConfig(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetNames: string[]
+): Promise<{ security: RoleSecurityConfig; appsScriptUrl: string }> {
+  const map = await fetchSheetSettingsMap(accessToken, spreadsheetId, sheetNames);
+  return {
+    security: extractSecurityFromMap(map),
+    appsScriptUrl: map.appsScriptUrl || '',
+  };
+}
+
+async function ensureSettingsSheetAndWrite(
   accessToken: string,
   spreadsheetId: string,
   sheetNames: string[],
-  agency: AgencySettings
+  agency: AgencySettings,
+  security?: RoleSecurityConfig,
+  appsScriptUrl?: string
 ): Promise<void> {
   if (!sheetNames.includes('Pengaturan_Instansi')) {
     await googleFetch(
@@ -593,7 +751,19 @@ export async function saveAgencySettingsToSheet(
     );
   }
 
-  const values = [
+  const existing = await fetchSheetSettingsMap(
+    accessToken,
+    spreadsheetId,
+    sheetNames.includes('Pengaturan_Instansi')
+      ? sheetNames
+      : [...sheetNames, 'Pengaturan_Instansi']
+  );
+
+  const mergedSecurity = security ?? extractSecurityFromMap(existing);
+  const mergedBridge =
+    appsScriptUrl !== undefined ? appsScriptUrl : existing.appsScriptUrl || '';
+
+  const values: (string | number)[][] = [
     ['Kunci_Pengaturan', 'Nilai'],
     ['namaInstansi', agency.namaInstansi],
     ['subUnit', agency.subUnit],
@@ -604,13 +774,24 @@ export async function saveAgencySettingsToSheet(
     ['jabatanPimpinan', agency.jabatanPimpinan],
     ['nipPimpinan', `'${agency.nipPimpinan}`],
     ['kodeSuratPrefix', agency.kodeSuratPrefix],
+    ['nomorUrutMulai', String(agency.nomorUrutMulai || 1)],
+    ['digitNomorUrut', String(agency.digitNomorUrut || 3)],
+    ['resetNomorMode', agency.resetNomorMode || 'tahunan'],
+    ['kunciNomorUrutUntukUser', agency.kunciNomorUrutUntukUser ? 'true' : 'false'],
+    ['appsScriptUrl', mergedBridge],
+    ['adminPwdSalt', mergedSecurity.admin?.salt || ''],
+    ['adminPwdHash', mergedSecurity.admin?.hash || ''],
+    ['adminPwdUpdatedAt', mergedSecurity.admin?.updatedAt || ''],
+    ['superAdminPwdSalt', mergedSecurity.superadmin?.salt || ''],
+    ['superAdminPwdHash', mergedSecurity.superadmin?.hash || ''],
+    ['superAdminPwdUpdatedAt', mergedSecurity.superadmin?.updatedAt || ''],
   ];
 
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
     )}/values/${encodeURIComponent(
-      'Pengaturan_Instansi!A1'
+      'Pengaturan_Instansi!A1:B30'
     )}?valueInputOption=USER_ENTERED`,
     accessToken,
     {
@@ -618,6 +799,33 @@ export async function saveAgencySettingsToSheet(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values }),
     }
+  );
+}
+
+export async function saveAgencySettingsToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetNames: string[],
+  agency: AgencySettings
+): Promise<void> {
+  await ensureSettingsSheetAndWrite(accessToken, spreadsheetId, sheetNames, agency);
+}
+
+export async function saveSecurityConfigToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetNames: string[],
+  agency: AgencySettings,
+  security: RoleSecurityConfig,
+  appsScriptUrl?: string
+): Promise<void> {
+  await ensureSettingsSheetAndWrite(
+    accessToken,
+    spreadsheetId,
+    sheetNames,
+    agency,
+    security,
+    appsScriptUrl
   );
 }
 
@@ -679,6 +887,89 @@ export async function updateRowPdfLink(
   );
 }
 
+export async function updateRowBuktiSetor(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetName: string,
+  rowNumber: number,
+  kodeBilling: string,
+  kodeNtpn: string,
+  buktiSetorUrl: string,
+  buktiSetorNama: string
+): Promise<void> {
+  const range = encodeURIComponent(`${sheetName}!AE${rowNumber}:AH${rowNumber}`);
+
+  await googleFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      spreadsheetId
+    )}/values/${range}?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        values: [
+          [
+            kodeBilling ? `'${kodeBilling}` : '',
+            kodeNtpn ? `'${kodeNtpn}` : '',
+            buktiSetorUrl,
+            buktiSetorNama,
+          ],
+        ],
+      }),
+    }
+  );
+}
+
+export async function deleteBeritaAcaraRow(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetName: string,
+  rowNumber: number
+): Promise<void> {
+  if (rowNumber < 2) {
+    throw new Error('Nomor baris tidak valid untuk dihapus.');
+  }
+  interface MetaResp {
+    sheets: Array<{ properties: { sheetId: number; title: string } }>;
+  }
+  const meta = await googleFetch<MetaResp>(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      spreadsheetId
+    )}?fields=sheets.properties(sheetId,title)`,
+    accessToken
+  );
+  const target = meta.sheets.find((s) => s.properties.title === sheetName);
+  if (!target) {
+    throw new Error(`Tab "${sheetName}" tidak ditemukan di Google Sheet.`);
+  }
+
+  await googleFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      spreadsheetId
+    )}:batchUpdate`,
+    accessToken,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId: target.properties.sheetId,
+                dimension: 'ROWS',
+                startIndex: rowNumber - 1,
+                endIndex: rowNumber,
+              },
+            },
+          },
+        ],
+      }),
+    }
+  );
+}
+
 export async function appendBeritaAcaraRow(
   accessToken: string,
   spreadsheetId: string,
@@ -693,7 +984,7 @@ export async function appendBeritaAcaraRow(
     | 'linkPdfBA'
   >
 ): Promise<void> {
-  const range = encodeURIComponent(`${sheetName}!A:AD`);
+  const range = encodeURIComponent(`${sheetName}!A:AH`);
   const row = [
     entry.idBA,
     entry.tanggalInput,
@@ -725,6 +1016,10 @@ export async function appendBeritaAcaraRow(
     '',
     '',
     '',
+    entry.kodeBilling ? `'${entry.kodeBilling}` : '',
+    entry.kodeNtpn ? `'${entry.kodeNtpn}` : '',
+    entry.buktiSetorUrl || '',
+    entry.buktiSetorNama || '',
   ];
 
   await googleFetch(
@@ -742,14 +1037,15 @@ export async function appendBeritaAcaraRow(
   );
 }
 
-export async function uploadPdfToDrive(
+export async function uploadDocumentToDrive(
   accessToken: string,
   fileName: string,
-  pdfBlob: Blob
+  fileBlob: Blob,
+  mimeType = 'application/pdf'
 ): Promise<{ id: string; webViewLink: string }> {
   const metadata = {
     name: fileName,
-    mimeType: 'application/pdf',
+    mimeType,
   };
 
   const formData = new FormData();
@@ -757,7 +1053,7 @@ export async function uploadPdfToDrive(
     'metadata',
     new Blob([JSON.stringify(metadata)], { type: 'application/json' })
   );
-  formData.append('file', pdfBlob, fileName);
+  formData.append('file', fileBlob, fileName);
 
   const res = await fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
@@ -771,7 +1067,7 @@ export async function uploadPdfToDrive(
   );
 
   if (!res.ok) {
-    let errorMessage = `Gagal mengunggah PDF ke Google Drive (${res.status})`;
+    let errorMessage = `Gagal mengunggah dokumen ke Google Drive (${res.status})`;
     try {
       const err = await res.json();
       if (err?.error?.message) errorMessage = err.error.message;
@@ -782,6 +1078,14 @@ export async function uploadPdfToDrive(
   }
 
   return (await res.json()) as { id: string; webViewLink: string };
+}
+
+export async function uploadPdfToDrive(
+  accessToken: string,
+  fileName: string,
+  pdfBlob: Blob
+): Promise<{ id: string; webViewLink: string }> {
+  return uploadDocumentToDrive(accessToken, fileName, pdfBlob, 'application/pdf');
 }
 
 export interface DriveSpreadsheetItem {

@@ -3,12 +3,12 @@ import {
   CheckCircle2,
   Clock,
   Download,
-  FileSpreadsheet,
   Lock,
   Printer,
   RefreshCw,
   Search,
   ShieldCheck,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 import {
@@ -17,6 +17,7 @@ import {
   UserRole,
   ValidationStatus,
 } from '../types';
+import { DEFAULT_VALIDATOR_NAME } from '../services/googleSheets';
 import { formatRupiah, generateBeritaAcaraPdf } from '../services/pdfGenerator';
 
 interface CetakBeritaAcaraViewProps {
@@ -32,6 +33,7 @@ interface CetakBeritaAcaraViewProps {
     decision: 'Disetujui' | 'Ditolak'
   ) => void;
   onRevokeValidation: (entry: BeritaAcaraPNBP) => void;
+  onDeleteEntry: (entry: BeritaAcaraPNBP) => void;
   onGoCreate: () => void;
   onRequireAuthOrSheet: () => void;
 }
@@ -41,13 +43,12 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
   agency,
   role,
   loading,
-  hasSpreadsheet,
   onRefresh,
   onPreview,
   onReviewDecision,
   onRevokeValidation,
+  onDeleteEntry,
   onGoCreate,
-  onRequireAuthOrSheet,
 }) => {
   const [statusFilter, setStatusFilter] = useState<'Semua' | ValidationStatus>(
     'Semua'
@@ -55,6 +56,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const canValidate = role === 'admin' || role === 'superadmin';
+  const isSuperAdmin = role === 'superadmin';
 
   const stats = useMemo(() => {
     const approved = entries.filter((e) => e.statusValidasi === 'Disetujui');
@@ -88,68 +90,46 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
     });
   }, [entries, statusFilter, searchQuery]);
 
-  if (!hasSpreadsheet) {
-    return (
-      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center sm:p-12">
-        <FileSpreadsheet className="mx-auto h-10 w-10 text-teal-700/40" />
-        <h2 className="mt-3 font-display text-base font-semibold text-slate-900">
-          Hubungkan Google Sheet Terlebih Dahulu
-        </h2>
-        <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-500">
-          Masuk dengan akun Google dan hubungkan atau buat Google Sheet PNBP di
-          panel koneksi agar data Berita Acara dapat divalidasi dan dicetak PDF.
-        </p>
-        <button
-          type="button"
-          onClick={onRequireAuthOrSheet}
-          className="mt-5 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#0F766E] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#0D5D57]"
-        >
-          Buka Koneksi Google Sheet
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5 pb-24 lg:pb-8">
-      {/* KPI Summary Strip */}
+      {/* KPI Summary Strip (Kemenkes Palette) */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Total Berita Acara</div>
+        <div className="rounded-2xl border border-[#10b1aa]/25 bg-white p-4">
+          <div className="text-xs text-[#63625e]">Total Berita Acara</div>
           <div className="mt-1 font-display text-2xl font-bold tabular-nums text-slate-900">
             {stats.total}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
-            Tercatat di Google Sheet
+          <div className="mt-0.5 text-[11px] text-[#898984]">
+            Tercatat di sistem
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Menunggu Validasi</div>
-          <div className="mt-1 font-display text-2xl font-bold tabular-nums text-amber-700">
+        <div className="rounded-2xl border border-[#e4872d]/30 bg-white p-4">
+          <div className="text-xs text-[#63625e]">Menunggu Validasi</div>
+          <div className="mt-1 font-display text-2xl font-bold tabular-nums text-[#e4872d]">
             {stats.pendingCount}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
+          <div className="mt-0.5 text-[11px] text-[#898984]">
             Cetak PDF terkunci
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">Disetujui (Siap Cetak)</div>
-          <div className="mt-1 font-display text-2xl font-bold tabular-nums text-teal-700">
+        <div className="rounded-2xl border border-[#10b1aa]/30 bg-[#c7edec]/20 p-4">
+          <div className="text-xs text-[#007376]">Disetujui (Siap Cetak)</div>
+          <div className="mt-1 font-display text-2xl font-bold tabular-nums text-[#007376]">
             {stats.approvedCount}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
-            Sah & masuk rekap bulanan
+          <div className="mt-0.5 text-[11px] text-[#63625e]">
+            Sah &amp; masuk rekap bulanan
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">PNBP Tunai Tervalidasi</div>
-          <div className="mt-1 font-mono text-base font-bold tabular-nums text-slate-900 sm:text-lg">
+        <div className="rounded-2xl border border-[#10b1aa]/25 bg-white p-4">
+          <div className="text-xs text-[#63625e]">PNBP Tunai Tervalidasi</div>
+          <div className="mt-1 font-mono text-base font-bold tabular-nums text-[#007376] sm:text-lg">
             {formatRupiah(stats.approvedNominal)}
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
+          <div className="mt-0.5 text-[11px] text-[#898984]">
             Ditolak: {stats.rejectedCount} berkas
           </div>
         </div>
@@ -157,41 +137,45 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
 
       {/* Role Notice for User & Admin */}
       {!canValidate ? (
-        <div className="flex flex-col gap-2.5 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-900 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2.5 rounded-xl border border-[#10b1aa]/30 bg-[#c7edec]/35 px-4 py-3 text-xs text-[#007376] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-2.5">
-            <Printer className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
+            <Printer className="mt-0.5 h-4 w-4 shrink-0 text-[#007376]" />
             <div>
-              Mode <strong>User (Petugas)</strong>: Berita Acara yang sudah{' '}
-              <strong>Disetujui Admin</strong> menampilkan tombol{' '}
-              <strong>Cetak</strong> dan <strong>Unduh PDF</strong>. Berkas
-              yang belum divalidasi tetap terkunci.
+              Mode <strong>User (Petugas)</strong>: Berita Acara yang telah{' '}
+              <strong>Disetujui Admin</strong> otomatis membuka tombol{' '}
+              <strong>Cetak</strong> dan <strong>Unduh PDF</strong>.
             </div>
           </div>
           {stats.approvedCount > 0 && statusFilter !== 'Disetujui' && (
             <button
               type="button"
               onClick={() => setStatusFilter('Disetujui')}
-              className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-lg border border-teal-700/30 bg-white px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-50"
+              className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-lg border border-[#007376]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#007376] hover:bg-[#c7edec]/40"
             >
               Tampilkan Siap Cetak ({stats.approvedCount})
             </button>
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs text-teal-900 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2.5 rounded-xl border border-[#10b1aa]/30 bg-[#c7edec]/35 px-4 py-3 text-xs text-[#007376] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-2.5">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#007376]" />
             <div>
-              Mode <strong>{role === 'superadmin' ? 'Super Admin' : 'Admin (Validator)'}</strong>: Klik tombol{' '}
-              <strong>Eksekusi</strong> pada berkas yang menunggu validasi
-              untuk menyetujui atau menolak Berita Acara sebelum dicetak User.
+              Mode{' '}
+              <strong>
+                {isSuperAdmin ? 'Super Admin' : 'Admin (Validator)'}
+              </strong>
+              : Klik tombol <strong>Eksekusi</strong> pada berkas yang menunggu
+              validasi.{' '}
+              {isSuperAdmin &&
+                'Super Admin juga dapat menghapus Berita Acara baik yang sudah maupun belum divalidasi.'}
             </div>
           </div>
           {stats.pendingCount > 0 && statusFilter !== 'Menunggu Validasi' && (
             <button
               type="button"
               onClick={() => setStatusFilter('Menunggu Validasi')}
-              className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0D5D57]"
+              className="inline-flex min-h-[36px] shrink-0 items-center justify-center rounded-lg bg-[#007376] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#005a5d]"
             >
               Antrean Eksekusi ({stats.pendingCount})
             </button>
@@ -200,9 +184,9 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
       )}
 
       {/* Filter & Search Bar */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl border border-[#bfbfbf]/60 bg-white p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
+          <div className="flex items-center gap-1 overflow-x-auto rounded-xl bg-[#c7edec]/35 p-1">
             {(
               ['Semua', 'Menunggu Validasi', 'Disetujui', 'Ditolak'] as const
             ).map((status) => (
@@ -212,8 +196,8 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                 onClick={() => setStatusFilter(status)}
                 className={`min-h-[36px] whitespace-nowrap shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   statusFilter === status
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
+                    ? 'bg-[#007376] text-white shadow-sm'
+                    : 'text-[#63625e] hover:text-slate-900'
                 }`}
               >
                 {status}
@@ -222,13 +206,13 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
           </div>
 
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[#898984]" />
             <input
               type="text"
-              placeholder="Cari nomor BA, petugas, wajib bayar..."
+              placeholder="Cari nomor BA, petugas, pengguna jasa..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="min-h-[40px] w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-xs text-slate-900 focus:border-teal-700 focus:outline-none sm:w-64"
+              className="min-h-[40px] w-full rounded-xl border border-[#bfbfbf] bg-white pl-9 pr-3 text-xs text-slate-900 focus:border-[#007376] focus:outline-none sm:w-64"
             />
           </div>
         </div>
@@ -238,7 +222,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-xl border border-[#bfbfbf] bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-[#c7edec]/30"
           >
             <RefreshCw
               className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`}
@@ -248,7 +232,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
           <button
             type="button"
             onClick={onGoCreate}
-            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-xl bg-[#0F766E] px-3.5 py-2 text-xs font-medium text-white hover:bg-[#0D5D57]"
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-xl bg-[#007376] px-3.5 py-2 text-xs font-medium text-white hover:bg-[#005a5d]"
           >
             + Buat BA Baru
           </button>
@@ -290,7 +274,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                         {item.nomorBA}
                       </div>
                       <div className="mt-0.5 text-[11px] text-slate-500 font-mono tabular-nums">
-                        {item.tanggalInput} · {item.pukulBA} WITA
+                        {item.tanggalInput}
                       </div>
                     </div>
                     <div className="shrink-0 text-right font-mono text-sm font-bold tabular-nums text-slate-900">
@@ -342,18 +326,16 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                         <button
                           type="button"
                           onClick={() => onPreview(item)}
-                          className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0F766E] px-3 text-xs font-semibold text-white hover:bg-[#0D5D57]"
+                          className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#007376] px-3 text-xs font-semibold text-white hover:bg-[#005a5d]"
                         >
                           <Printer className="h-4 w-4" />
                           Cetak
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            const { blob, fileName } = generateBeritaAcaraPdf(
-                              item,
-                              agency
-                            );
+                          onClick={async () => {
+                            const { blob, fileName } =
+                              await generateBeritaAcaraPdf(item, agency);
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = url;
@@ -361,7 +343,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                             a.click();
                             URL.revokeObjectURL(url);
                           }}
-                          className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 text-xs font-medium text-slate-800 hover:bg-slate-50"
+                          className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl border border-[#bfbfbf] bg-white px-3 text-xs font-medium text-slate-800 hover:bg-[#c7edec]/30"
                         >
                           <Download className="h-4 w-4" />
                           Unduh PDF
@@ -370,7 +352,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onRevokeValidation(item)}
-                            className="min-h-[44px] w-full rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            className="min-h-[44px] flex-1 rounded-xl border border-[#bfbfbf] px-3 text-xs font-medium text-[#63625e] hover:bg-slate-50"
                           >
                             Batalkan Validasi
                           </button>
@@ -378,7 +360,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                       </>
                     ) : (
                       <>
-                        <div className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-100 px-3 text-xs font-medium text-slate-500">
+                        <div className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-100 px-3 text-xs font-medium text-[#63625e]">
                           <Lock className="h-3.5 w-3.5" />
                           {isRejected
                             ? 'Ditolak Admin (Terkunci)'
@@ -390,13 +372,23 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                             onClick={() =>
                               onReviewDecision(item, 'Disetujui')
                             }
-                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl bg-[#0F766E] px-4 text-xs font-semibold text-white hover:bg-[#0D5D57]"
+                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl bg-[#007376] px-4 text-xs font-semibold text-white hover:bg-[#005a5d]"
                           >
                             <ShieldCheck className="h-4 w-4" />
                             Eksekusi
                           </button>
                         )}
                       </>
+                    )}
+                    {isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteEntry(item)}
+                        className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-[#c00000]/30 bg-red-50 px-3 text-xs font-semibold text-[#c00000] hover:bg-red-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Hapus Berita Acara
+                      </button>
                     )}
                   </div>
                 </div>
@@ -405,14 +397,14 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
           </div>
 
           {/* Desktop High-Density Table (>= md) */}
-          <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white md:block">
+          <div className="hidden overflow-hidden rounded-2xl border border-[#bfbfbf]/60 bg-white md:block">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-600">
-                    <th className="px-4 py-3 font-semibold">Nomor BA & Waktu</th>
+                  <tr className="border-b border-[#007376]/20 bg-[#007376] text-white">
+                    <th className="px-4 py-3 font-semibold">Nomor BA &amp; Tanggal</th>
                     <th className="px-4 py-3 font-semibold">
-                      Pihak I (Petugas) & Pihak II (Wajib Bayar)
+                      Petugas dan Pengguna Jasa
                     </th>
                     <th className="px-4 py-3 font-semibold">Layanan PNBP</th>
                     <th className="px-4 py-3 font-semibold text-right">
@@ -432,25 +424,25 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                     return (
                       <tr
                         key={`${item.rowNumber}-${item.idBA}`}
-                        className="hover:bg-slate-50/70"
+                        className="hover:bg-[#c7edec]/20"
                       >
                         <td className="px-4 py-3 align-top whitespace-nowrap">
-                          <div className="font-mono font-semibold text-teal-800">
+                          <div className="font-mono font-semibold text-[#007376]">
                             {item.nomorBA}
                           </div>
-                          <div className="mt-0.5 font-mono text-[11px] text-slate-500 tabular-nums">
-                            {item.tanggalInput} · {item.pukulBA}
+                          <div className="mt-0.5 font-mono text-[11px] text-[#63625e] tabular-nums">
+                            {item.tanggalInput}
                           </div>
                         </td>
 
                         <td className="px-4 py-3 align-top max-w-xs">
                           <div className="font-medium text-slate-900">
-                            {item.namaWajibBayar}
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-slate-500">
                             Petugas: {item.namaPetugas}
                           </div>
-                          <div className="text-[11px] text-slate-400 font-mono tabular-nums">
+                          <div className="mt-0.5 text-[11px] text-[#63625e]">
+                            Pengguna Jasa: {item.namaWajibBayar}
+                          </div>
+                          <div className="text-[11px] text-[#898984] font-mono tabular-nums">
                             NIP. {item.nipPetugas}
                           </div>
                         </td>
@@ -459,7 +451,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                           <div className="font-medium text-slate-800">
                             {item.jenisLayanan}
                           </div>
-                          <div className="mt-0.5 text-[11px] text-slate-500 line-clamp-2">
+                          <div className="mt-0.5 text-[11px] text-[#63625e] line-clamp-2">
                             {item.rincianLayanan}
                           </div>
                         </td>
@@ -472,35 +464,35 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
 
                         <td className="px-4 py-3 align-top whitespace-nowrap">
                           {isApproved ? (
-                            <div className="text-teal-800">
+                            <div className="text-[#007376]">
                               <div className="inline-flex items-center gap-1.5 font-semibold">
                                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                                 Disetujui
                               </div>
-                              <div className="mt-0.5 text-[11px] text-slate-500">
-                                {item.validatorAdmin || 'Admin'} ·{' '}
+                              <div className="mt-0.5 text-[11px] text-[#63625e]">
+                                {item.validatorAdmin || DEFAULT_VALIDATOR_NAME} ·{' '}
                                 <span className="font-mono tabular-nums">
                                   {item.tanggalValidasi}
                                 </span>
                               </div>
                             </div>
                           ) : isRejected ? (
-                            <div className="text-red-700">
+                            <div className="text-[#c00000]">
                               <div className="inline-flex items-center gap-1.5 font-semibold">
                                 <XCircle className="h-3.5 w-3.5 shrink-0" />
                                 Ditolak
                               </div>
-                              <div className="mt-0.5 text-[11px] text-slate-500">
+                              <div className="mt-0.5 text-[11px] text-[#63625e]">
                                 {item.catatanAdmin || '-'}
                               </div>
                             </div>
                           ) : (
-                            <div className="text-amber-700">
+                            <div className="text-[#e4872d]">
                               <div className="inline-flex items-center gap-1.5 font-semibold">
                                 <Clock className="h-3.5 w-3.5 shrink-0" />
                                 Menunggu Validasi
                               </div>
-                              <div className="mt-0.5 text-[11px] text-slate-500">
+                              <div className="mt-0.5 text-[11px] text-[#898984]">
                                 PDF terkunci
                               </div>
                             </div>
@@ -514,16 +506,19 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => onPreview(item)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0D5D57]"
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#007376] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#005a5d]"
                                 >
                                   <Printer className="h-3.5 w-3.5" />
                                   Cetak
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={async () => {
                                     const { blob, fileName } =
-                                      generateBeritaAcaraPdf(item, agency);
+                                      await generateBeritaAcaraPdf(
+                                        item,
+                                        agency
+                                      );
                                     const url = URL.createObjectURL(blob);
                                     const a = document.createElement('a');
                                     a.href = url;
@@ -531,7 +526,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                                     a.click();
                                     URL.revokeObjectURL(url);
                                   }}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#bfbfbf] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-[#c7edec]/30"
                                 >
                                   <Download className="h-3.5 w-3.5" />
                                   Unduh PDF
@@ -540,7 +535,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => onRevokeValidation(item)}
-                                    className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                    className="rounded-lg px-2 py-1.5 text-xs font-medium text-[#63625e] hover:bg-slate-100 hover:text-slate-900"
                                   >
                                     Batal
                                   </button>
@@ -548,7 +543,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                               </>
                             ) : (
                               <>
-                                <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-slate-400">
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-[#898984]">
                                   <Lock className="h-3 w-3" />
                                   Terkunci
                                 </span>
@@ -558,13 +553,24 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                                     onClick={() =>
                                       onReviewDecision(item, 'Disetujui')
                                     }
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F766E] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0D5D57]"
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#007376] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#005a5d]"
                                   >
                                     <ShieldCheck className="h-3.5 w-3.5" />
                                     Eksekusi
                                   </button>
                                 )}
                               </>
+                            )}
+                            {isSuperAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => onDeleteEntry(item)}
+                                title="Hapus Berita Acara (Khusus Super Admin)"
+                                className="inline-flex items-center gap-1 rounded-lg border border-[#c00000]/25 px-2.5 py-1.5 text-xs font-medium text-[#c00000] hover:bg-red-50"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Hapus
+                              </button>
                             )}
                           </div>
                         </td>

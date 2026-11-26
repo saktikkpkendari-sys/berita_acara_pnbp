@@ -192,3 +192,22 @@ export function parseTanggalIndoParts(isoDate: string) {
     tanggalTTD: `${dateNum} ${BULAN_INDO[monthIndex]} ${yearNum}`,
   };
 }
+
+export function parseGangguanInfo(
+  jamGangguanRaw: string,
+  fallbackIsoDate?: string
+) {
+  const raw = String(jamGangguanRaw || '').trim();
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})\s+(.+)$/);
+  const isoDate = match ? match[1] : fallbackIsoDate || '';
+  const jam = match ? match[2].trim() : raw || '-';
+  const parts = isoDate
+    ? parseTanggalIndoParts(isoDate)
+    : parseTanggalIndoParts(new Date().toISOString().slice(0, 10));
+
+  return {
+    isoDate,
+    jam,
+    ...parts,
+  };
+}

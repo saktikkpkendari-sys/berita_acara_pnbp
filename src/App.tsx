@@ -1,16 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   CheckCircle2,
   Database,
   FilePlus2,
-  FileSpreadsheet,
   FileText,
+  KeyRound,
   LogOut,
   Printer,
+  Receipt,
   ShieldAlert,
   ShieldCheck,
-  UserCog,
+  User as UserIcon,
   X,
 } from 'lucide-react';
 import {
@@ -18,7 +19,9 @@ import {
   AgencySettings,
   BeritaAcaraPNBP,
   PendingConfirmation,
+  RoleSecurityConfig,
   SpreadsheetInfo,
+  StorageMode,
   UserRole,
 } from './types';
 import { googleSignIn, initAuth, logout } from './services/googleAuth';
@@ -26,23 +29,50 @@ import {
   appendBeritaAcaraRow,
   createAutomatedSpreadsheet,
   DEFAULT_AGENCY_SETTINGS,
+  DEFAULT_VALIDATOR_NAME,
+  deleteBeritaAcaraRow,
   DriveSpreadsheetItem,
   fetchAgencySettings,
   fetchSheetEntries,
+  fetchSheetSecurityConfig,
   inspectSpreadsheet,
   listAppSpreadsheets,
   saveAgencySettingsToSheet,
+  saveSecurityConfigToSheet,
+  updateRowBuktiSetor,
   updateRowPdfLink,
   updateRowValidation,
+  uploadDocumentToDrive,
   uploadPdfToDrive,
 } from './services/googleSheets';
-import { formatRupiah } from './services/pdfGenerator';
+import {
+  appendViaAppsScript,
+  deleteViaAppsScript,
+  fetchViaAppsScript,
+  saveBuktiSetorViaAppsScript,
+  saveSettingsViaAppsScript,
+  validateViaAppsScript,
+} from './services/appsScriptBridge';
+import {
+  loadBridgeUrl,
+  loadLocalAgencySettings,
+  loadLocalEntries,
+  loadLocalSecurityConfig,
+  mergeSecurityConfigs,
+  saveBridgeUrl,
+  saveLocalAgencySettings,
+  saveLocalEntries,
+  saveLocalSecurityConfig,
+} from './services/roleAuth';
+import { formatRupiah, loadKopSuratDataUrl } from './services/pdfGenerator';
 import { ConfirmModal } from './components/ConfirmModal';
 import { BeritaAcaraPreviewModal } from './components/BeritaAcaraPreviewModal';
 import { CreateBeritaAcaraView } from './components/CreateBeritaAcaraView';
 import { CetakBeritaAcaraView } from './components/CetakBeritaAcaraView';
+import { InputBuktiSetorView } from './components/InputBuktiSetorView';
 import { MonthlyRecapView } from './components/MonthlyRecapView';
 import { SuperAdminSheetModal } from './components/SuperAdminSheetModal';
+import { RoleLoginModal } from './components/RoleLoginModal';
 
 const MENU_ITEMS: Array<{
   id: ActiveTab;
@@ -52,20 +82,26 @@ const MENU_ITEMS: Array<{
 }> = [
   {
     id: 'buat',
-    label: '1. Buat Berita Acara',
+    label: '1. Buat BA',
     mobileLabel: 'Buat BA',
     icon: FilePlus2,
   },
   {
     id: 'cetak',
-    label: '2. Cetak Berita Acara',
+    label: '2. Cetak BA',
     mobileLabel: 'Cetak BA',
     icon: Printer,
   },
   {
+    id: 'bukti',
+    label: '3. Input Bukti Setor',
+    mobileLabel: 'Bukti Setor',
+    icon: Receipt,
+  },
+  {
     id: 'rekap',
-    label: '3. Cetak Rekapitulasi Bulanan',
-    mobileLabel: 'Rekap Bulanan',
+    label: '4. Rekap Bulanan',
+    mobileLabel: 'Rekap',
     icon: FileText,
   },
 ];
@@ -76,18 +112,53 @@ const ROLE_LABELS: Record<UserRole, string> = {
   superadmin: 'Super Admin',
 };
 
+async function readFileAsDataUrl(file: File): Promise<{
+  dataUrl: string;
+  base64: string;
+  mimeType: string;
+}> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () =>
+      reject(new Error('Gagal membaca file dokumen bukti setor.'));
+    reader.readAsDataURL(file);
+  });
+  const commaIdx = dataUrl.indexOf(',');
+  const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+  return {
+    dataUrl,
+    base64,
+    mimeType: file.type || 'application/octet-stream',
+  };
+}
+
 export default function App() {
-  const [needsAuth, setNeedsAuth] = useState<boolean>(true);
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [isLoggingInGoogle, setIsLoggingInGoogle] = useState<boolean>(false);
 
-  const [role, setRole] = useState<UserRole>('superadmin');
+  // Default access is always public 'user' — Admin & Super Admin require password
+  const [role, setRole] = useState<UserRole>('user');
   const [activeTab, setActiveTab] = useState<ActiveTab>('buat');
 
+  const [securityConfig, setSecurityConfig] = useState<RoleSecurityConfig>(() =>
+    loadLocalSecurityConfig()
+  );
+  const [bridgeUrl, setBridgeUrl] = useState<string>(() => loadBridgeUrl());
+
+  const [roleLoginOpen, setRoleLoginOpen] = useState<boolean>(false);
+  const [roleLoginInitial, setRoleLoginInitial] = useState<
+    'admin' | 'superadmin'
+  >('admin');
+
   const [spreadsheet, setSpreadsheet] = useState<SpreadsheetInfo | null>(null);
-  const [entries, setEntries] = useState<BeritaAcaraPNBP[]>([]);
-  const [agency, setAgency] = useState<AgencySettings>(DEFAULT_AGENCY_SETTINGS);
+  const [entries, setEntries] = useState<BeritaAcaraPNBP[]>(() =>
+    loadLocalEntries()
+  );
+  const [agency, setAgency] = useState<AgencySettings>(() =>
+    loadLocalAgencySettings()
+  );
   const [driveSpreadsheets, setDriveSpreadsheets] = useState<
     DriveSpreadsheetItem[]
   >([]);
@@ -106,10 +177,24 @@ export default function App() {
     entry: BeritaAcaraPNBP;
     decision: 'Disetujui' | 'Ditolak';
   } | null>(null);
+  const [reviewValidator, setReviewValidator] = useState<string>(
+    DEFAULT_VALIDATOR_NAME
+  );
   const [reviewNotes, setReviewNotes] = useState<string>('');
 
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(
     null
+  );
+
+  const storageMode: StorageMode = useMemo(() => {
+    if (accessToken && spreadsheet) return 'google-sheet';
+    if (bridgeUrl) return 'apps-script';
+    return 'local';
+  }, [accessToken, spreadsheet, bridgeUrl]);
+
+  const pendingCount = useMemo(
+    () => entries.filter((e) => e.statusValidasi === 'Menunggu Validasi').length,
+    [entries]
   );
 
   const showToast = useCallback((message: string) => {
@@ -120,32 +205,73 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void loadKopSuratDataUrl();
     const unsubscribe = initAuth(
       (authedUser, token) => {
         setUser(authedUser);
         setAccessToken(token);
-        setNeedsAuth(false);
       },
       (maybeUser) => {
         setUser(maybeUser);
         setAccessToken(null);
-        setNeedsAuth(true);
       }
     );
     return () => unsubscribe();
   }, []);
+
+  const loadBridgeData = useCallback(async (url: string) => {
+    if (!url) return;
+    setLoadingData(true);
+    setErrorMsg(null);
+    try {
+      const result = await fetchViaAppsScript(url);
+      setEntries(result.entries);
+      setAgency(result.agency);
+      saveLocalAgencySettings(result.agency);
+      setSecurityConfig((prev) => {
+        const merged = mergeSecurityConfigs(prev, result.security);
+        saveLocalSecurityConfig(merged);
+        return merged;
+      });
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : 'Gagal mengambil data publik dari Google Sheet.'
+      );
+    } finally {
+      setLoadingData(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!accessToken && bridgeUrl) {
+      void loadBridgeData(bridgeUrl);
+    }
+  }, [accessToken, bridgeUrl, loadBridgeData]);
 
   const loadSpreadsheetData = useCallback(
     async (token: string, info: SpreadsheetInfo) => {
       setLoadingData(true);
       setErrorMsg(null);
       try {
-        const [loadedEntries, loadedSettings] = await Promise.all([
+        const [loadedEntries, loadedSettings, sheetSec] = await Promise.all([
           fetchSheetEntries(token, info.spreadsheetId, info.activeDataSheet),
           fetchAgencySettings(token, info.spreadsheetId, info.sheetNames),
+          fetchSheetSecurityConfig(token, info.spreadsheetId, info.sheetNames),
         ]);
         setEntries(loadedEntries);
         setAgency(loadedSettings);
+        saveLocalAgencySettings(loadedSettings);
+        setSecurityConfig((prev) => {
+          const merged = mergeSecurityConfigs(prev, sheetSec.security);
+          saveLocalSecurityConfig(merged);
+          return merged;
+        });
+        if (sheetSec.appsScriptUrl && !bridgeUrl) {
+          setBridgeUrl(sheetSec.appsScriptUrl);
+          saveBridgeUrl(sheetSec.appsScriptUrl);
+        }
       } catch (err) {
         setErrorMsg(
           err instanceof Error
@@ -156,8 +282,25 @@ export default function App() {
         setLoadingData(false);
       }
     },
-    []
+    [bridgeUrl]
   );
+
+  const refreshCurrentData = useCallback(async () => {
+    if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+      await loadSpreadsheetData(accessToken, spreadsheet);
+    } else if (storageMode === 'apps-script' && bridgeUrl) {
+      await loadBridgeData(bridgeUrl);
+    } else {
+      setEntries(loadLocalEntries());
+    }
+  }, [
+    storageMode,
+    accessToken,
+    spreadsheet,
+    bridgeUrl,
+    loadSpreadsheetData,
+    loadBridgeData,
+  ]);
 
   const refreshDriveList = useCallback(
     async (token: string, autoLoadFirst = false) => {
@@ -182,16 +325,17 @@ export default function App() {
     [loadSpreadsheetData]
   );
 
-  const handleLogin = async () => {
-    setIsLoggingIn(true);
+  const handleGoogleLogin = async () => {
+    setIsLoggingInGoogle(true);
     setErrorMsg(null);
     try {
       const res = await googleSignIn();
       if (res) {
         setUser(res.user);
         setAccessToken(res.accessToken);
-        setNeedsAuth(false);
-        showToast(`Terhubung sebagai ${res.user.email || res.user.displayName}`);
+        showToast(
+          `Akun Google terhubung: ${res.user.email || res.user.displayName}`
+        );
         await refreshDriveList(res.accessToken, true);
       }
     } catch (err) {
@@ -201,18 +345,71 @@ export default function App() {
           : 'Gagal masuk dengan Google. Pastikan pop-up browser diizinkan.'
       );
     } finally {
-      setIsLoggingIn(false);
+      setIsLoggingInGoogle(false);
     }
   };
 
-  const handleLogout = async () => {
+  const handleGoogleLogout = async () => {
     await logout();
     setUser(null);
     setAccessToken(null);
-    setNeedsAuth(true);
     setSpreadsheet(null);
-    setEntries([]);
     setDriveSpreadsheets([]);
+    if (bridgeUrl) {
+      await loadBridgeData(bridgeUrl);
+    } else {
+      setEntries(loadLocalEntries());
+    }
+    showToast('Koneksi Google Workspace diputus.');
+  };
+
+  const handleSaveSecurityConfig = async (updated: RoleSecurityConfig) => {
+    setSecurityConfig(updated);
+    saveLocalSecurityConfig(updated);
+
+    if (accessToken && spreadsheet) {
+      await saveSecurityConfigToSheet(
+        accessToken,
+        spreadsheet.spreadsheetId,
+        spreadsheet.sheetNames,
+        agency,
+        updated,
+        bridgeUrl
+      );
+      if (!spreadsheet.sheetNames.includes('Pengaturan_Instansi')) {
+        setSpreadsheet({
+          ...spreadsheet,
+          sheetNames: [...spreadsheet.sheetNames, 'Pengaturan_Instansi'],
+        });
+      }
+    } else if (bridgeUrl) {
+      await saveSettingsViaAppsScript(bridgeUrl, agency, updated);
+    }
+  };
+
+  const handleSaveBridgeUrl = async (url: string) => {
+    setBridgeUrl(url);
+    saveBridgeUrl(url);
+
+    if (accessToken && spreadsheet) {
+      await saveSecurityConfigToSheet(
+        accessToken,
+        spreadsheet.spreadsheetId,
+        spreadsheet.sheetNames,
+        agency,
+        securityConfig,
+        url
+      );
+    }
+
+    if (url && !(accessToken && spreadsheet)) {
+      await loadBridgeData(url);
+      showToast('URL koneksi publik Google Sheet berhasil disimpan & dimuat.');
+    } else if (!url) {
+      showToast('URL koneksi publik dihapus.');
+    } else {
+      showToast('URL koneksi publik disimpan ke Pengaturan Instansi.');
+    }
   };
 
   const handleCreateSpreadsheet = (title: string, includeSample: boolean) => {
@@ -236,12 +433,21 @@ export default function App() {
             agency,
             includeSample
           );
+          if (securityConfig.admin || securityConfig.superadmin || bridgeUrl) {
+            await saveSecurityConfigToSheet(
+              accessToken,
+              info.spreadsheetId,
+              info.sheetNames,
+              agency,
+              securityConfig,
+              bridgeUrl
+            );
+          }
           setSpreadsheet(info);
           await Promise.all([
             loadSpreadsheetData(accessToken, info),
             refreshDriveList(accessToken, false),
           ]);
-          setSheetModalOpen(false);
           showToast(`Google Sheet "${info.title}" berhasil dibuat di Drive.`);
         } catch (err) {
           const message =
@@ -265,7 +471,6 @@ export default function App() {
       const info = await inspectSpreadsheet(accessToken, urlOrId);
       setSpreadsheet(info);
       await loadSpreadsheetData(accessToken, info);
-      setSheetModalOpen(false);
       showToast(`Terhubung ke "${info.title}" (Tab: ${info.activeDataSheet})`);
     } catch (err) {
       setErrorMsg(
@@ -296,10 +501,16 @@ export default function App() {
       | 'linkPdfBA'
     >
   ) => {
-    if (!accessToken || !spreadsheet) return;
+    const targetDesc =
+      storageMode === 'google-sheet'
+        ? `Data beserta tanda tangan digital akan dikirim ke tab ${spreadsheet?.activeDataSheet} dengan status awal "Menunggu Validasi".`
+        : storageMode === 'apps-script'
+        ? 'Data beserta tanda tangan digital akan dikirim ke Google Sheet pusat dengan status awal "Menunggu Validasi".'
+        : 'Data beserta tanda tangan digital akan disimpan ke penyimpanan perangkat ini dengan status awal "Menunggu Validasi".';
+
     setConfirmation({
-      title: 'Simpan Berita Acara PNBP ke Google Sheet?',
-      description: `Data beserta tanda tangan digital Pihak Pertama dan Pihak Kedua akan dikirim ke tab ${spreadsheet.activeDataSheet} dengan status awal "Menunggu Validasi".`,
+      title: 'Simpan Berita Acara PNBP?',
+      description: targetDesc,
       details: [
         `Nomor BA: ${payload.nomorBA}`,
         `Petugas: ${payload.namaPetugas} (NIP. ${payload.nipPetugas})`,
@@ -308,13 +519,32 @@ export default function App() {
       ],
       confirmLabel: 'Simpan Berita Acara',
       onConfirm: async () => {
-        await appendBeritaAcaraRow(
-          accessToken,
-          spreadsheet.spreadsheetId,
-          spreadsheet.activeDataSheet,
-          payload
-        );
-        await loadSpreadsheetData(accessToken, spreadsheet);
+        if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+          await appendBeritaAcaraRow(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.activeDataSheet,
+            payload
+          );
+          await loadSpreadsheetData(accessToken, spreadsheet);
+        } else if (storageMode === 'apps-script' && bridgeUrl) {
+          await appendViaAppsScript(bridgeUrl, payload);
+          await loadBridgeData(bridgeUrl);
+        } else {
+          const current = loadLocalEntries();
+          const newItem: BeritaAcaraPNBP = {
+            ...payload,
+            rowNumber: current.length + 2,
+            statusValidasi: 'Menunggu Validasi',
+            validatorAdmin: '',
+            tanggalValidasi: '',
+            catatanAdmin: '',
+            linkPdfBA: '',
+          };
+          const next = [newItem, ...current];
+          saveLocalEntries(next);
+          setEntries(next);
+        }
         showToast(
           `Berita Acara ${payload.nomorBA} tersimpan. Menunggu validasi Admin.`
         );
@@ -325,23 +555,21 @@ export default function App() {
 
   const handleSubmitReviewDecision = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reviewTarget || !accessToken || !spreadsheet) return;
-    if (role === 'user') return;
+    if (!reviewTarget || role === 'user') return;
 
     const { entry, decision } = reviewTarget;
-    const validatorName =
-      user?.displayName || user?.email || agency.namaPimpinan;
+    const validatorName = reviewValidator.trim() || DEFAULT_VALIDATOR_NAME;
     const noteText = reviewNotes.trim();
 
     setReviewTarget(null);
     setConfirmation({
       title:
         decision === 'Disetujui'
-          ? 'Konfirmasi Validasi & Persetujuan Cetak PDF'
+          ? 'Konfirmasi Eksekusi & Persetujuan Cetak PDF'
           : 'Konfirmasi Penolakan Berita Acara',
       description:
         decision === 'Disetujui'
-          ? `Berita Acara ${entry.nomorBA} akan disetujui sehingga PDF resmi dan Rekapitulasi Bulanan dapat dicetak.`
+          ? `Berita Acara ${entry.nomorBA} akan disetujui sehingga User dapat mencetak PDF resmi dan masuk Rekapitulasi Bulanan.`
           : `Berita Acara ${entry.nomorBA} akan ditolak dan tetap terkunci dari pencetakan PDF.`,
       details: [
         `Wajib Bayar: ${entry.namaWajibBayar}`,
@@ -350,31 +578,57 @@ export default function App() {
         `Catatan: ${noteText || '-'}`,
       ],
       confirmLabel:
-        decision === 'Disetujui' ? 'Validasi & Setujui' : 'Tolak Berkas',
+        decision === 'Disetujui' ? 'Eksekusi & Setujui' : 'Eksekusi Penolakan',
       variant: decision === 'Ditolak' ? 'danger' : 'primary',
       onConfirm: async () => {
-        await updateRowValidation(
-          accessToken,
-          spreadsheet.spreadsheetId,
-          spreadsheet.activeDataSheet,
-          entry.rowNumber,
-          decision,
-          validatorName,
-          noteText
-        );
-        await loadSpreadsheetData(accessToken, spreadsheet);
+        if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+          await updateRowValidation(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.activeDataSheet,
+            entry.rowNumber,
+            decision,
+            validatorName,
+            noteText
+          );
+          await loadSpreadsheetData(accessToken, spreadsheet);
+        } else if (storageMode === 'apps-script' && bridgeUrl) {
+          await validateViaAppsScript(
+            bridgeUrl,
+            entry.rowNumber,
+            decision,
+            validatorName,
+            noteText
+          );
+          await loadBridgeData(bridgeUrl);
+        } else {
+          const today = new Date().toISOString().slice(0, 10);
+          const next = loadLocalEntries().map((item) =>
+            item.idBA === entry.idBA && item.rowNumber === entry.rowNumber
+              ? {
+                  ...item,
+                  statusValidasi: decision,
+                  validatorAdmin: validatorName,
+                  tanggalValidasi: today,
+                  catatanAdmin: noteText,
+                }
+              : item
+          );
+          saveLocalEntries(next);
+          setEntries(next);
+        }
         showToast(
-          `Berita Acara ${entry.nomorBA} berhasil diperbarui menjadi "${decision}".`
+          `Berita Acara ${entry.nomorBA} dieksekusi menjadi "${decision}".`
         );
       },
     });
   };
 
   const handleRevokeValidation = (entry: BeritaAcaraPNBP) => {
-    if (!accessToken || !spreadsheet || role === 'user') return;
+    if (role === 'user') return;
     setConfirmation({
       title: 'Batalkan Validasi Berita Acara?',
-      description: `Status baris ${entry.rowNumber} akan dikembalikan ke "Menunggu Validasi" dan pencetakan PDF dikunci kembali.`,
+      description: `Status Berita Acara ${entry.nomorBA} akan dikembalikan ke "Menunggu Validasi" dan pencetakan PDF dikunci kembali.`,
       details: [
         `Nomor BA: ${entry.nomorBA}`,
         `Wajib Bayar: ${entry.namaWajibBayar}`,
@@ -382,17 +636,185 @@ export default function App() {
       confirmLabel: 'Batalkan Validasi',
       variant: 'danger',
       onConfirm: async () => {
-        await updateRowValidation(
-          accessToken,
-          spreadsheet.spreadsheetId,
-          spreadsheet.activeDataSheet,
-          entry.rowNumber,
-          'Menunggu Validasi',
-          '',
-          ''
-        );
-        await loadSpreadsheetData(accessToken, spreadsheet);
+        if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+          await updateRowValidation(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.activeDataSheet,
+            entry.rowNumber,
+            'Menunggu Validasi',
+            '',
+            ''
+          );
+          await loadSpreadsheetData(accessToken, spreadsheet);
+        } else if (storageMode === 'apps-script' && bridgeUrl) {
+          await validateViaAppsScript(
+            bridgeUrl,
+            entry.rowNumber,
+            'Menunggu Validasi',
+            '',
+            ''
+          );
+          await loadBridgeData(bridgeUrl);
+        } else {
+          const next = loadLocalEntries().map((item) =>
+            item.idBA === entry.idBA && item.rowNumber === entry.rowNumber
+              ? {
+                  ...item,
+                  statusValidasi: 'Menunggu Validasi' as const,
+                  validatorAdmin: '',
+                  tanggalValidasi: '',
+                  catatanAdmin: '',
+                }
+              : item
+          );
+          saveLocalEntries(next);
+          setEntries(next);
+        }
         showToast(`Validasi ${entry.nomorBA} dibatalkan.`);
+      },
+    });
+  };
+
+  const handleSaveBuktiSetor = (
+    entry: BeritaAcaraPNBP,
+    payload: {
+      kodeBilling: string;
+      kodeNtpn: string;
+      file: File | null;
+    }
+  ) => {
+    const fileLabel = payload.file
+      ? payload.file.name
+      : entry.buktiSetorNama || 'Tidak ada lampiran';
+
+    setConfirmation({
+      title: 'Simpan Data Bukti Setor PNBP?',
+      description: `Kode Billing, Kode NTPN, dan dokumen bukti setor untuk Berita Acara ${entry.nomorBA} akan diperbarui dan ditampilkan pada Rekap Bulanan.`,
+      details: [
+        `Nomor BA: ${entry.nomorBA}`,
+        `Pengguna Jasa: ${entry.namaWajibBayar}`,
+        `Kode Billing: ${payload.kodeBilling || '-'}`,
+        `Kode NTPN: ${payload.kodeNtpn || '-'}`,
+        `Dokumen Bukti Setor: ${fileLabel}`,
+      ],
+      confirmLabel: 'Simpan Bukti Setor',
+      onConfirm: async () => {
+        let nextUrl = entry.buktiSetorUrl || '';
+        let nextName = entry.buktiSetorNama || '';
+
+        if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+          if (payload.file) {
+            const uploaded = await uploadDocumentToDrive(
+              accessToken,
+              `BuktiSetor_${entry.nomorBA.replace(/[^a-zA-Z0-9_-]/g, '_')}_${payload.file.name}`,
+              payload.file,
+              payload.file.type || 'application/octet-stream'
+            );
+            nextUrl = uploaded.webViewLink;
+            nextName = payload.file.name;
+          }
+          await updateRowBuktiSetor(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.activeDataSheet,
+            entry.rowNumber,
+            payload.kodeBilling,
+            payload.kodeNtpn,
+            nextUrl,
+            nextName
+          );
+          await loadSpreadsheetData(accessToken, spreadsheet);
+        } else if (storageMode === 'apps-script' && bridgeUrl) {
+          let fileBase64: string | undefined;
+          let fileMimeType: string | undefined;
+          if (payload.file) {
+            const encoded = await readFileAsDataUrl(payload.file);
+            fileBase64 = encoded.base64;
+            fileMimeType = encoded.mimeType;
+            nextName = payload.file.name;
+          }
+          await saveBuktiSetorViaAppsScript(bridgeUrl, {
+            rowNumber: entry.rowNumber,
+            kodeBilling: payload.kodeBilling,
+            kodeNtpn: payload.kodeNtpn,
+            buktiSetorUrl: nextUrl,
+            buktiSetorNama: nextName,
+            fileBase64,
+            fileMimeType,
+          });
+          await loadBridgeData(bridgeUrl);
+        } else {
+          if (payload.file) {
+            const encoded = await readFileAsDataUrl(payload.file);
+            nextUrl = encoded.dataUrl;
+            nextName = payload.file.name;
+          }
+          const next = loadLocalEntries().map((item) =>
+            item.idBA === entry.idBA && item.rowNumber === entry.rowNumber
+              ? {
+                  ...item,
+                  kodeBilling: payload.kodeBilling,
+                  kodeNtpn: payload.kodeNtpn,
+                  buktiSetorUrl: nextUrl,
+                  buktiSetorNama: nextName,
+                }
+              : item
+          );
+          saveLocalEntries(next);
+          setEntries(next);
+        }
+
+        showToast(
+          `Bukti setor untuk ${entry.nomorBA} berhasil disimpan ke Rekap.`
+        );
+        setActiveTab('buat');
+      },
+    });
+  };
+
+  const handleDeleteBeritaAcara = (entry: BeritaAcaraPNBP) => {
+    if (role !== 'superadmin') return;
+    setConfirmation({
+      title: 'Hapus Berita Acara & Rekapitulasi?',
+      description: `Hanya Super Admin yang berwenang menghapus Berita Acara (${entry.statusValidasi}). Setelah dihapus, Nomor Urut Berita Acara berikutnya otomatis menyesuaikan ke nomor urut ${entry.nomorBA}.`,
+      details: [
+        `Nomor BA: ${entry.nomorBA}`,
+        `Status Saat Ini: ${entry.statusValidasi}`,
+        `Petugas: ${entry.namaPetugas}`,
+        `Pengguna Jasa: ${entry.namaWajibBayar}`,
+        `Nominal PNBP: ${formatRupiah(entry.nominalAngka)}`,
+      ],
+      confirmLabel: 'Hapus Permanen',
+      variant: 'danger',
+      onConfirm: async () => {
+        if (storageMode === 'google-sheet' && accessToken && spreadsheet) {
+          await deleteBeritaAcaraRow(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.activeDataSheet,
+            entry.rowNumber
+          );
+          await loadSpreadsheetData(accessToken, spreadsheet);
+        } else if (storageMode === 'apps-script' && bridgeUrl) {
+          await deleteViaAppsScript(bridgeUrl, entry.rowNumber, entry.idBA);
+          await loadBridgeData(bridgeUrl);
+        } else {
+          const filtered = loadLocalEntries()
+            .filter(
+              (item) =>
+                !(item.idBA === entry.idBA && item.rowNumber === entry.rowNumber)
+            )
+            .map((item, idx) => ({ ...item, rowNumber: idx + 2 }));
+          saveLocalEntries(filtered);
+          setEntries(filtered);
+        }
+        if (previewEntry?.idBA === entry.idBA) {
+          setPreviewEntry(null);
+        }
+        showToast(
+          `Berita Acara ${entry.nomorBA} dihapus. Nomor Urut BA berikutnya menyesuaikan ke nomor yang dihapus.`
+        );
       },
     });
   };
@@ -449,202 +871,270 @@ export default function App() {
   };
 
   const handleSaveAgencySettings = (updated: AgencySettings) => {
-    if (!accessToken || !spreadsheet || role !== 'superadmin') return;
+    if (role !== 'superadmin') return;
     setConfirmation({
-      title: 'Simpan Pengaturan Kop Surat Instansi?',
-      description: `Identitas kop surat dan pimpinan pengesah akan diperbarui pada tab Pengaturan_Instansi di "${spreadsheet.title}".`,
+      title: 'Simpan Pengaturan Instansi & Penomoran BA?',
+      description: `Identitas instansi, pimpinan pengesah, serta aturan Nomor Urut Berita Acara akan diperbarui untuk dokumen BA & Rekap Bulanan.`,
       details: [
         `Instansi: ${updated.namaInstansi}`,
         `Satuan Kerja: ${updated.subUnit}`,
+        `Jabatan Pengesahan: ${updated.jabatanPimpinan}`,
         `Pimpinan: ${updated.namaPimpinan}`,
+        `Format Nomor: Mulai #${updated.nomorUrutMulai} · ${updated.kodeSuratPrefix} (${updated.resetNomorMode})`,
       ],
       confirmLabel: 'Simpan Pengaturan',
       onConfirm: async () => {
-        await saveAgencySettingsToSheet(
-          accessToken,
-          spreadsheet.spreadsheetId,
-          spreadsheet.sheetNames,
-          updated
-        );
+        saveLocalAgencySettings(updated);
         setAgency(updated);
-        if (!spreadsheet.sheetNames.includes('Pengaturan_Instansi')) {
-          setSpreadsheet({
-            ...spreadsheet,
-            sheetNames: [...spreadsheet.sheetNames, 'Pengaturan_Instansi'],
-          });
+
+        if (accessToken && spreadsheet) {
+          await saveAgencySettingsToSheet(
+            accessToken,
+            spreadsheet.spreadsheetId,
+            spreadsheet.sheetNames,
+            updated
+          );
+          if (!spreadsheet.sheetNames.includes('Pengaturan_Instansi')) {
+            setSpreadsheet({
+              ...spreadsheet,
+              sheetNames: [...spreadsheet.sheetNames, 'Pengaturan_Instansi'],
+            });
+          }
+        } else if (bridgeUrl) {
+          await saveSettingsViaAppsScript(bridgeUrl, updated, securityConfig);
         }
-        showToast('Pengaturan instansi tersimpan di Google Sheet.');
+        showToast('Pengaturan instansi berhasil disimpan.');
       },
     });
   };
 
-  return (
-    <div className="min-h-screen bg-[#F3F8F8] text-slate-900">
-      {/* Top Bar (3-zone contract on desktop, compact <=56px on mobile) */}
-      <header className="no-print sticky top-0 z-30 border-b border-teal-900/10 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:h-16 sm:px-6 lg:gap-8 lg:px-8">
-          {/* Zone 1: Brand wordmark */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('buat')}
-            className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0"
-          >
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0F766E] font-display text-xs font-bold text-white">
-              BK
-            </span>
-            <span className="font-display text-sm font-bold tracking-tight text-slate-900 sm:text-base">
-              PNBP BKK Kendari
-            </span>
-          </button>
+  const openRoleLogin = (preferred: 'admin' | 'superadmin') => {
+    setRoleLoginInitial(preferred);
+    setRoleLoginOpen(true);
+  };
 
-          {/* Zone 2: 3 Concise Menu Links (Desktop) */}
+  const handleExitPrivilegedRole = () => {
+    setRole('user');
+    setSheetModalOpen(false);
+    setReviewTarget(null);
+    showToast('Kembali ke mode akses publik User (Petugas).');
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F4FAFA] text-slate-900">
+      {/* Kemenkes Top Accent Bar */}
+      <div className="no-print h-1 w-full bg-gradient-to-r from-[#007376] via-[#10b1aa] to-[#d1db26]" />
+
+      {/* Top Bar (Adapted per User Role) */}
+      <header className="no-print sticky top-0 z-30 border-b border-[#10b1aa]/20 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4 sm:h-16 sm:px-6 lg:gap-6 lg:px-8">
+          {/* Zone 1: Brand wordmark + role badge */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('buat')}
+              className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#007376] to-[#10b1aa] font-display text-xs font-bold text-white ring-2 ring-[#d1db26]/70">
+                BK
+              </span>
+              <span className="font-display text-sm font-bold tracking-tight text-slate-900 sm:text-base">
+                PNBP BKK Kendari
+              </span>
+            </button>
+            <span
+              className={`hidden sm:inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
+                role === 'superadmin'
+                  ? 'border-[#007376] bg-[#007376] text-white'
+                  : role === 'admin'
+                  ? 'border-[#10b1aa]/40 bg-[#c7edec]/60 text-[#007376]'
+                  : 'border-[#bfbfbf]/70 bg-slate-100 text-[#63625e]'
+              }`}
+            >
+              {role === 'user' ? (
+                <UserIcon className="h-3 w-3" />
+              ) : (
+                <ShieldCheck className="h-3 w-3" />
+              )}
+              {ROLE_LABELS[role]}
+            </span>
+          </div>
+
+          {/* Zone 2: 4 Concise Menu Links (Desktop) */}
           <nav
-            className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-600"
+            className="hidden lg:flex items-center gap-6 text-sm font-medium text-[#63625e]"
             aria-label="Menu Utama"
           >
             {MENU_ITEMS.map((item) => {
               const isActive = activeTab === item.id;
+              const showPendingCount =
+                role !== 'user' && item.id === 'cetak' && pendingCount > 0;
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setActiveTab(item.id)}
-                  className={`whitespace-nowrap shrink-0 border-b-2 py-5 transition-colors ${
+                  className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 border-b-2 py-5 transition-colors ${
                     isActive
-                      ? 'border-[#0F766E] font-semibold text-[#0F766E]'
-                      : 'border-transparent hover:text-slate-900'
+                      ? 'border-[#007376] font-semibold text-[#007376]'
+                      : 'border-transparent hover:text-[#007376]'
                   }`}
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  {showPendingCount && (
+                    <span className="rounded bg-[#f4f7c2] px-1.5 py-0.5 font-mono text-[11px] font-bold text-[#63625e] tabular-nums">
+                      {pendingCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </nav>
 
-          {/* Zone 3: Single Primary Action / Auth */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            {needsAuth || !accessToken ? (
+          {/* Zone 3: Role-Adapted Actions */}
+          <div className="flex items-center gap-2 shrink-0">
+            {role === 'user' && (
               <button
                 type="button"
-                onClick={handleLogin}
-                disabled={isLoggingIn}
-                className="gsi-material-button"
+                onClick={() => openRoleLogin('admin')}
+                className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-[#10b1aa]/40 bg-[#c7edec]/50 px-3 py-1.5 text-xs font-semibold text-[#007376] hover:bg-[#c7edec]"
               >
-                <div className="gsi-material-button-state" />
-                <div className="gsi-material-button-content-wrapper">
-                  <div className="gsi-material-button-icon">
-                    <svg
-                      version="1.1"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 48 48"
-                      style={{ display: 'block' }}
-                    >
-                      <path
-                        fill="#EA4335"
-                        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                      />
-                      <path
-                        fill="#4285F4"
-                        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                      />
-                      <path fill="none" d="M0 0h48v48H0z" />
-                    </svg>
-                  </div>
-                  <span className="gsi-material-button-contents">
-                    {isLoggingIn ? 'Menghubungkan...' : 'Sign in with Google'}
-                  </span>
-                </div>
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>Masuk Admin</span>
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Keluar</span>
-              </button>
+            )}
+
+            {role === 'admin' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => openRoleLogin('superadmin')}
+                  className="hidden sm:inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-[#bfbfbf] bg-white px-3 py-1.5 text-xs font-medium text-[#63625e] hover:bg-slate-50"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Super Admin
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExitPrivilegedRole}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-[#bfbfbf] bg-white px-3 py-1.5 text-xs font-medium text-[#63625e] hover:bg-slate-50"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>Keluar Admin</span>
+                </button>
+              </>
+            )}
+
+            {role === 'superadmin' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSheetModalOpen(true)}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg bg-[#007376] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#005e60]"
+                >
+                  <Database className="h-3.5 w-3.5" />
+                  <span>Menu Super Admin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExitPrivilegedRole}
+                  className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-[#bfbfbf] bg-white px-3 py-1.5 text-xs font-medium text-[#63625e] hover:bg-slate-50"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Keluar</span>
+                </button>
+              </>
             )}
           </div>
         </div>
       </header>
 
-      {/* Workspace Control Strip (Role Switcher & Google Sheet Status) */}
-      {!needsAuth && accessToken && (
-        <div className="no-print border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="inline-flex items-center gap-1.5 font-medium text-slate-600">
-                <UserCog className="h-3.5 w-3.5 text-teal-700" />
-                Peran Akses:
-              </span>
-              <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
-                {(['user', 'admin', 'superadmin'] as const).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRole(r)}
-                    className={`min-h-[32px] whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                      role === r
-                        ? 'bg-[#0F766E] text-white shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {ROLE_LABELS[r]}
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* Role-Specific Context Strip */}
+      <div
+        className={`no-print border-b ${
+          role === 'superadmin'
+            ? 'border-[#005e60] bg-[#007376] text-white'
+            : role === 'admin'
+            ? 'border-[#10b1aa]/30 bg-[#c7edec]/45 text-[#007376]'
+            : 'border-[#bfbfbf]/50 bg-white text-[#63625e]'
+        }`}
+      >
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2">
+            {role === 'user' && (
+              <>
+                <UserIcon className="h-3.5 w-3.5 text-[#10b1aa] shrink-0" />
+                <span>
+                  Akses Publik <strong>User (Petugas)</strong> &middot;{' '}
+                  {storageMode === 'google-sheet'
+                    ? `Terhubung Sheet: ${spreadsheet?.title}`
+                    : storageMode === 'apps-script'
+                    ? 'Terhubung ke Google Sheet Pusat'
+                    : 'Mode Siap Input (Penyimpanan Perangkat)'}
+                </span>
+              </>
+            )}
+            {role === 'admin' && (
+              <>
+                <ShieldCheck className="h-3.5 w-3.5 text-[#007376] shrink-0" />
+                <span>
+                  <strong>Mode Admin (Validator)</strong> &middot;{' '}
+                  {pendingCount > 0
+                    ? `${pendingCount} Berita Acara menunggu eksekusi validasi`
+                    : 'Semua Berita Acara telah dieksekusi'}
+                </span>
+              </>
+            )}
+            {role === 'superadmin' && (
+              <>
+                <Database className="h-3.5 w-3.5 text-[#d1db26] shrink-0" />
+                <span>
+                  <strong>Mode Super Admin</strong> &middot;{' '}
+                  {spreadsheet
+                    ? `Sheet Aktif: ${spreadsheet.title}`
+                    : bridgeUrl
+                    ? 'Terhubung Bridge Publik Google Sheet'
+                    : 'Kelola Google Sheet, Nomor BA & Penghapusan Data'}
+                </span>
+              </>
+            )}
+          </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <span className="text-slate-500 truncate max-w-[220px]">
-                {spreadsheet ? (
-                  <>
-                    Sheet:{' '}
-                    <strong className="text-slate-800">
-                      {spreadsheet.title}
-                    </strong>
-                  </>
-                ) : (
-                  'Belum ada Google Sheet aktif'
-                )}
-              </span>
-
-              {role === 'superadmin' && (
-                <button
-                  type="button"
-                  onClick={() => setSheetModalOpen(true)}
-                  className="inline-flex min-h-[34px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-teal-700/30 bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100"
-                >
-                  <Database className="h-3.5 w-3.5" />
-                  Kelola Google Sheet
-                </button>
-              )}
-            </div>
+          <div className="flex items-center gap-2">
+            {role === 'admin' && pendingCount > 0 && activeTab !== 'cetak' && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('cetak')}
+                className="inline-flex min-h-[30px] items-center rounded-md bg-[#007376] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#005e60]"
+              >
+                Buka Antrean Eksekusi ({pendingCount})
+              </button>
+            )}
+            {role === 'superadmin' && (
+              <button
+                type="button"
+                onClick={() => setSheetModalOpen(true)}
+                className="inline-flex min-h-[30px] items-center gap-1 rounded-md border border-white/30 bg-white/15 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-white/25"
+              >
+                Atur Sheet & Sandi
+              </button>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Alerts / Toasts */}
       <div className="no-print mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {errorMsg && (
-          <div className="mt-4 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900 sm:text-sm">
+          <div className="mt-4 flex items-start justify-between gap-3 rounded-xl border border-[#c00000]/30 bg-red-50 px-4 py-3 text-xs text-[#c00000] sm:text-sm">
             <div className="flex items-start gap-2.5">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[#c00000]" />
               <span>{errorMsg}</span>
             </div>
             <button
               type="button"
               onClick={() => setErrorMsg(null)}
-              className="text-red-700 hover:text-red-900"
+              className="text-[#c00000] hover:opacity-80"
               aria-label="Tutup pesan galat"
             >
               <X className="h-4 w-4" />
@@ -653,15 +1143,15 @@ export default function App() {
         )}
 
         {toastMsg && (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-xs text-teal-900 sm:text-sm">
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[#10b1aa]/40 bg-[#c7edec]/70 px-4 py-3 text-xs text-[#007376] sm:text-sm">
             <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-teal-700" />
-              <span>{toastMsg}</span>
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-[#007376]" />
+              <span className="font-medium">{toastMsg}</span>
             </div>
             <button
               type="button"
               onClick={() => setToastMsg(null)}
-              className="text-teal-700 hover:text-teal-900"
+              className="text-[#007376] hover:opacity-80"
               aria-label="Tutup notifikasi"
             >
               <X className="h-4 w-4" />
@@ -670,226 +1160,131 @@ export default function App() {
         )}
       </div>
 
-      {/* Main Content */}
+      {/* Main Content — Always accessible by anyone as User */}
       <main className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
-        {needsAuth || !accessToken ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-            <div className="max-w-2xl">
-              <div className="text-xs font-semibold tracking-wide text-teal-700 uppercase">
-                Kementerian Kesehatan RI · BKK Kelas I Kendari
-              </div>
-              <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-                Berita Acara Pembayaran PNBP Tunai & Rekapitulasi Bulanan
-              </h1>
-              <p className="mt-3 text-sm leading-relaxed text-slate-600">
-                Aplikasi mobile-friendly untuk pencatatan pembayaran PNBP tunai
-                saat gangguan sistem elektronik, dilengkapi tanda tangan digital
-                langsung pada layar smartphone, validasi oleh Admin, serta
-                pencetakan PDF resmi dan penyimpanan Google Sheets yang dikelola
-                oleh Super Admin.
-              </p>
+        {activeTab === 'buat' && (
+          <CreateBeritaAcaraView
+            agency={agency}
+            entries={entries}
+            role={role}
+            hasSpreadsheet={true}
+            onSubmitBeritaAcara={handleSubmitBeritaAcara}
+            onRequireAuthOrSheet={() => {
+              if (role === 'superadmin') {
+                setSheetModalOpen(true);
+              } else {
+                openRoleLogin('superadmin');
+              }
+            }}
+          />
+        )}
 
-              <div className="mt-6">
-                <button
-                  type="button"
-                  onClick={handleLogin}
-                  disabled={isLoggingIn}
-                  className="gsi-material-button"
-                >
-                  <div className="gsi-material-button-state" />
-                  <div className="gsi-material-button-content-wrapper">
-                    <div className="gsi-material-button-icon">
-                      <svg
-                        version="1.1"
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 48 48"
-                        style={{ display: 'block' }}
-                      >
-                        <path
-                          fill="#EA4335"
-                          d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                        />
-                        <path
-                          fill="#4285F4"
-                          d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                        />
-                        <path fill="none" d="M0 0h48v48H0z" />
-                      </svg>
-                    </div>
-                    <span className="gsi-material-button-contents">
-                      {isLoggingIn
-                        ? 'Menghubungkan ke Google...'
-                        : 'Sign in with Google'}
-                    </span>
-                  </div>
-                </button>
-              </div>
+        {activeTab === 'cetak' && (
+          <CetakBeritaAcaraView
+            entries={entries}
+            agency={agency}
+            role={role}
+            loading={loadingData}
+            hasSpreadsheet={true}
+            onRefresh={refreshCurrentData}
+            onPreview={(item) => setPreviewEntry(item)}
+            onReviewDecision={(item, decision) => {
+              setReviewValidator(item.validatorAdmin || DEFAULT_VALIDATOR_NAME);
+              setReviewNotes(item.catatanAdmin || '');
+              setReviewTarget({ entry: item, decision });
+            }}
+            onRevokeValidation={handleRevokeValidation}
+            onDeleteEntry={handleDeleteBeritaAcara}
+            onGoCreate={() => setActiveTab('buat')}
+            onRequireAuthOrSheet={() => {
+              if (role === 'superadmin') {
+                setSheetModalOpen(true);
+              } else {
+                openRoleLogin('superadmin');
+              }
+            }}
+          />
+        )}
 
-              <div className="mt-8 grid grid-cols-1 gap-4 border-t border-slate-200 pt-6 text-xs text-slate-600 sm:grid-cols-3">
-                <div>
-                  <div className="font-semibold text-slate-900">
-                    1. Buat Berita Acara
-                  </div>
-                  <p className="mt-1">
-                    Dropdown Nama & NIP Petugas BKK Kendari, nominal otomatis
-                    terbilang, dan tanda tangan langsung di smartphone.
-                  </p>
-                </div>
-                <div>
-                  <div className="font-semibold text-slate-900">
-                    2. Cetak Berita Acara
-                  </div>
-                  <p className="mt-1">
-                    Admin memvalidasi pengajuan sebelum PDF resmi sesuai
-                    template BKK Kelas I Kendari dapat dicetak.
-                  </p>
-                </div>
-                <div>
-                  <div className="font-semibold text-slate-900">
-                    3. Cetak Rekapitulasi Bulanan
-                  </div>
-                  <p className="mt-1">
-                    Rekapitulasi PNBP tunai per bulan khusus berkas tervalidasi,
-                    siap unduh PDF atau simpan ke Google Drive.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Quick prompt if signed in without active spreadsheet */}
-            {!spreadsheet && (
-              <div className="no-print mb-5 flex flex-col gap-3 rounded-2xl border border-teal-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                <div className="flex items-start gap-3">
-                  <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-teal-700" />
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      Siapkan Google Sheet PNBP Tunai
-                    </div>
-                    <p className="text-xs text-slate-600">
-                      {role === 'superadmin'
-                        ? 'Buat Google Sheet baru dengan struktur PNBP BKK Kendari atau pilih sheet yang sudah ada di Drive.'
-                        : 'Ubah peran ke Super Admin untuk membuat atau menghubungkan Google Sheet penyimpanan data.'}
-                    </p>
-                  </div>
-                </div>
-                {role === 'superadmin' ? (
-                  <button
-                    type="button"
-                    onClick={() => setSheetModalOpen(true)}
-                    className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0F766E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0D5D57]"
-                  >
-                    <Database className="h-4 w-4" />
-                    Buat / Pilih Google Sheet
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setRole('superadmin')}
-                    className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-xl border border-teal-700/30 bg-teal-50 px-4 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-100"
-                  >
-                    <ShieldCheck className="h-4 w-4" />
-                    Buka Mode Super Admin
-                  </button>
-                )}
-              </div>
-            )}
+        {activeTab === 'bukti' && (
+          <InputBuktiSetorView
+            entries={entries}
+            loading={loadingData}
+            onSaveBuktiSetor={handleSaveBuktiSetor}
+          />
+        )}
 
-            {activeTab === 'buat' && (
-              <CreateBeritaAcaraView
-                agency={agency}
-                nextSequence={entries.length + 1}
-                hasSpreadsheet={Boolean(spreadsheet)}
-                onSubmitBeritaAcara={handleSubmitBeritaAcara}
-                onRequireAuthOrSheet={() => {
-                  if (role !== 'superadmin') setRole('superadmin');
-                  setSheetModalOpen(true);
-                }}
-              />
-            )}
-
-            {activeTab === 'cetak' && (
-              <CetakBeritaAcaraView
-                entries={entries}
-                agency={agency}
-                role={role}
-                loading={loadingData}
-                hasSpreadsheet={Boolean(spreadsheet)}
-                onRefresh={() =>
-                  accessToken &&
-                  spreadsheet &&
-                  loadSpreadsheetData(accessToken, spreadsheet)
-                }
-                onPreview={(item) => setPreviewEntry(item)}
-                onReviewDecision={(item, decision) => {
-                  setReviewNotes(item.catatanAdmin || '');
-                  setReviewTarget({ entry: item, decision });
-                }}
-                onRevokeValidation={handleRevokeValidation}
-                onGoCreate={() => setActiveTab('buat')}
-                onRequireAuthOrSheet={() => {
-                  if (role !== 'superadmin') setRole('superadmin');
-                  setSheetModalOpen(true);
-                }}
-              />
-            )}
-
-            {activeTab === 'rekap' && (
-              <MonthlyRecapView
-                entries={entries}
-                agency={agency}
-                hasSpreadsheet={Boolean(spreadsheet)}
-                onRequestSaveRecapToDrive={handleSaveRecapToDrive}
-                onRequireAuthOrSheet={() => {
-                  if (role !== 'superadmin') setRole('superadmin');
-                  setSheetModalOpen(true);
-                }}
-              />
-            )}
-          </>
+        {activeTab === 'rekap' && (
+          <MonthlyRecapView
+            entries={entries}
+            agency={agency}
+            role={role}
+            hasSpreadsheet={true}
+            canSaveToDrive={Boolean(accessToken && spreadsheet)}
+            onDeleteEntry={handleDeleteBeritaAcara}
+            onRequestSaveRecapToDrive={handleSaveRecapToDrive}
+            onRequireAuthOrSheet={() => {
+              if (role === 'superadmin') {
+                setSheetModalOpen(true);
+              } else {
+                openRoleLogin('superadmin');
+              }
+            }}
+          />
         )}
       </main>
 
-      {/* Mobile Bottom Tab Bar (Thumb Zone, 3 Exact Menus) */}
-      {!needsAuth && accessToken && (
-        <nav
-          className="no-print fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-md pb-safe lg:hidden"
-          aria-label="Navigasi Smartphone"
-        >
-          <div className="grid h-16 grid-cols-3 items-center">
-            {MENU_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveTab(item.id)}
-                  className={`flex h-full flex-col items-center justify-center gap-1 px-1 transition-colors ${
-                    isActive
-                      ? 'text-[#0F766E] font-semibold'
-                      : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
+      {/* Mobile Bottom Tab Bar (Thumb Zone, 4 Menus) */}
+      <nav
+        className="no-print fixed bottom-0 left-0 right-0 z-30 border-t border-[#10b1aa]/25 bg-white/95 backdrop-blur-md pb-safe lg:hidden"
+        aria-label="Navigasi Smartphone"
+      >
+        <div className="grid h-16 grid-cols-4 items-center">
+          {MENU_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            const showBadge =
+              role !== 'user' && item.id === 'cetak' && pendingCount > 0;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id)}
+                className={`relative flex h-full flex-col items-center justify-center gap-1 px-1 transition-colors ${
+                  isActive
+                    ? 'text-[#007376] font-semibold'
+                    : 'text-[#898984] hover:text-[#007376]'
+                }`}
+              >
+                <div className="relative">
                   <Icon className="h-5 w-5" />
-                  <span className="text-[11px] tracking-tight whitespace-nowrap">
-                    {item.mobileLabel}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </nav>
-      )}
+                  {showBadge && (
+                    <span className="absolute -right-2.5 -top-1 rounded bg-[#e4872d] px-1 text-[9px] font-bold text-white tabular-nums">
+                      {pendingCount}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10.5px] tracking-tight whitespace-nowrap">
+                  {item.mobileLabel}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* Role Password Login Modal (Admin / Super Admin) */}
+      <RoleLoginModal
+        open={roleLoginOpen}
+        initialRole={roleLoginInitial}
+        securityConfig={securityConfig}
+        onClose={() => setRoleLoginOpen(false)}
+        onSuccess={(unlockedRole) => {
+          setRole(unlockedRole);
+          showToast(`Berhasil masuk sebagai ${ROLE_LABELS[unlockedRole]}.`);
+        }}
+        onSetupInitialSuperAdmin={handleSaveSecurityConfig}
+      />
 
       {/* Admin Execution & Validation Modal */}
       {reviewTarget && (
@@ -922,10 +1317,24 @@ export default function App() {
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-slate-500">Nominal Tunai:</span>
-                  <span className="font-mono font-semibold text-teal-800 tabular-nums">
+                  <span className="font-mono font-semibold text-[#007376] tabular-nums">
                     {formatRupiah(reviewTarget.entry.nominalAngka)}
                   </span>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  Validator Pengesah (Default)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={reviewValidator}
+                  onChange={(e) => setReviewValidator(e.target.value)}
+                  placeholder={DEFAULT_VALIDATOR_NAME}
+                  className="mt-1.5 min-h-[42px] w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-[#007376] focus:outline-none"
+                />
               </div>
 
               <div>
@@ -942,7 +1351,7 @@ export default function App() {
                     }
                     className={`min-h-[40px] rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
                       reviewTarget.decision === 'Disetujui'
-                        ? 'bg-[#0F766E] text-white shadow-sm'
+                        ? 'bg-[#007376] text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -957,7 +1366,7 @@ export default function App() {
                     }
                     className={`min-h-[40px] rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
                       reviewTarget.decision === 'Ditolak'
-                        ? 'bg-red-700 text-white shadow-sm'
+                        ? 'bg-[#c00000] text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -979,7 +1388,7 @@ export default function App() {
                   }
                   value={reviewNotes}
                   onChange={(e) => setReviewNotes(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-teal-700 focus:outline-none"
+                  className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-[#007376] focus:outline-none"
                 />
               </div>
             </div>
@@ -995,8 +1404,8 @@ export default function App() {
                 type="submit"
                 className={`min-h-[42px] rounded-xl px-4 py-2 text-sm font-semibold text-white ${
                   reviewTarget.decision === 'Disetujui'
-                    ? 'bg-[#0F766E] hover:bg-[#0D5D57]'
-                    : 'bg-red-700 hover:bg-red-800'
+                    ? 'bg-[#007376] hover:bg-[#005e60]'
+                    : 'bg-[#c00000] hover:bg-red-800'
                 }`}
               >
                 Eksekusi Keputusan
@@ -1010,21 +1419,29 @@ export default function App() {
       <BeritaAcaraPreviewModal
         entry={previewEntry}
         agency={agency}
+        canSaveToDrive={Boolean(accessToken && spreadsheet)}
         onClose={() => setPreviewEntry(null)}
         onRequestSaveToDrive={handleSaveBeritaAcaraToDrive}
       />
 
-      {/* Super Admin Sheet & Agency Management Modal */}
+      {/* Super Admin Sheet, Agency & Password Management Modal */}
       <SuperAdminSheetModal
         open={sheetModalOpen}
         role={role}
         userEmail={user?.email || ''}
+        hasGoogleAuth={Boolean(accessToken)}
+        isLoggingInGoogle={isLoggingInGoogle}
         spreadsheet={spreadsheet}
         driveSpreadsheets={driveSpreadsheets}
         loadingDriveList={loadingDriveList}
         loadingData={loadingData}
+        entries={entries}
         agency={agency}
+        securityConfig={securityConfig}
+        bridgeUrl={bridgeUrl}
         onClose={() => setSheetModalOpen(false)}
+        onGoogleLogin={handleGoogleLogin}
+        onGoogleLogout={handleGoogleLogout}
         onCreateSpreadsheet={handleCreateSpreadsheet}
         onConnectSpreadsheet={handleConnectSpreadsheet}
         onSelectDriveSpreadsheet={handleConnectSpreadsheet}
@@ -1033,9 +1450,12 @@ export default function App() {
           accessToken && refreshDriveList(accessToken, false)
         }
         onSaveAgencySettings={handleSaveAgencySettings}
+        onSaveSecurityConfig={handleSaveSecurityConfig}
+        onSaveBridgeUrl={handleSaveBridgeUrl}
+        onDeleteEntry={handleDeleteBeritaAcara}
       />
 
-      {/* Explicit Confirmation Modal for Google Workspace Mutations */}
+      {/* Explicit Confirmation Modal for Mutations */}
       <ConfirmModal
         confirmation={confirmation}
         onClose={() => setConfirmation(null)}

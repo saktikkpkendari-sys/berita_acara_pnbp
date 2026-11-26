@@ -5,21 +5,256 @@ export function generateFreeAppsScript(
   agency: AgencySettings
 ): string {
   return `/**
- * OTOMASI GOOGLE SHEETS BERITA ACARA PNBP TUNAI (100% GRATIS)
+ * OTOMASI GOOGLE SHEETS & WEB APP API PUBLIK (100% GRATIS)
  * Instansi    : ${agency.subUnit} (${agency.namaInstansi})
  * Sumber Data : Tab "${sheetName}"
  * Syarat Cetak: Hanya baris dengan Status_Validasi (Kolom Z) = "Disetujui"
+ *
+ * CARA DEPLOY WEB APP (Agar Siapapun dengan status User bisa akses tanpa login Google):
+ * 1. Klik Deploy -> New deployment -> pilih Type: Web app
+ * 2. Execute as: Me (Email Anda)
+ * 3. Who has access: Anyone
+ * 4. Klik Deploy, salin URL Web App (/exec), lalu tempel di Menu Super Admin aplikasi.
  */
 
 const CONFIG = {
   DATA_SHEET: '${sheetName}',
   REKAP_SHEET: 'Rekap_Bulanan_PNBP',
+  SETTINGS_SHEET: 'Pengaturan_Instansi',
   NAMA_FOLDER_DRIVE: 'Arsip_PDF_BA_PNBP_Kendari',
   COL_STATUS: 26,    // Kolom Z: Status_Validasi
   COL_VALIDATOR: 27, // Kolom AA: Validator_Admin
   COL_TGL_VAL: 28,   // Kolom AB: Tanggal_Validasi
+  COL_CATATAN: 29,   // Kolom AC: Catatan_Admin
   COL_LINK_PDF: 30,  // Kolom AD: Link_PDF_BA
 };
+
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
+    const entries = [];
+    if (sheet && sheet.getLastRow() > 1) {
+      const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 34).getDisplayValues();
+      for (let i = 0; i < values.length; i++) {
+        const r = values[i];
+        if (!r.some((c) => String(c || '').trim())) continue;
+        entries.push({
+          rowNumber: i + 2,
+          idBA: r[0] || '',
+          tanggalInput: r[1] || '',
+          nomorBA: r[2] || '',
+          hari: r[3] || '-',
+          tanggalTeks: r[4] || '-',
+          bulanTeks: r[5] || '-',
+          tahun: r[6] || '-',
+          pukulBA: r[7] || '-',
+          lokasi: r[8] || '-',
+          namaPetugas: r[9] || '-',
+          nipPetugas: r[10] || '-',
+          jabatanPetugas: r[11] || '-',
+          namaWajibBayar: r[12] || '-',
+          nikWajibBayar: r[13] || '-',
+          noHP: r[14] || '-',
+          alamatInstansi: r[15] || '-',
+          jamGangguan: r[16] || '-',
+          jenisLayanan: r[17] || '-',
+          rincianLayanan: r[18] || '-',
+          nominalAngka: Number(String(r[19] || '0').replace(/[^0-9.-]/g, '')) || 0,
+          terbilang: r[20] || '-',
+          kotaTTD: r[21] || 'Kendari',
+          tanggalTTD: r[22] || '-',
+          ttdWajibBayar: r[23] || '',
+          ttdPetugas: r[24] || '',
+          statusValidasi: r[25] || 'Menunggu Validasi',
+          validatorAdmin: r[26] || '',
+          tanggalValidasi: r[27] || '',
+          catatanAdmin: r[28] || '',
+          linkPdfBA: r[29] || '',
+          kodeBilling: r[30] || '',
+          kodeNtpn: r[31] || '',
+          buktiSetorUrl: r[32] || '',
+          buktiSetorNama: r[33] || '',
+        });
+      }
+    }
+
+    const map = {};
+    const settingsSheet = ss.getSheetByName(CONFIG.SETTINGS_SHEET);
+    if (settingsSheet && settingsSheet.getLastRow() > 1) {
+      const sRows = settingsSheet.getRange(2, 1, settingsSheet.getLastRow() - 1, 2).getDisplayValues();
+      sRows.forEach((sr) => {
+        if (sr[0]) map[String(sr[0]).trim()] = String(sr[1] || '').trim();
+      });
+    }
+
+    const security = {};
+    if (map.adminPwdSalt && map.adminPwdHash) {
+      security.admin = {
+        salt: map.adminPwdSalt,
+        hash: map.adminPwdHash,
+        updatedAt: map.adminPwdUpdatedAt || '',
+      };
+    }
+    if (map.superAdminPwdSalt && map.superAdminPwdHash) {
+      security.superadmin = {
+        salt: map.superAdminPwdSalt,
+        hash: map.superAdminPwdHash,
+        updatedAt: map.superAdminPwdUpdatedAt || '',
+      };
+    }
+
+    return jsonOut({
+      ok: true,
+      entries: entries,
+      agency: {
+        namaInstansi: map.namaInstansi,
+        subUnit: map.subUnit,
+        alamatInstansi: map.alamatInstansi,
+        kota: map.kota,
+        teleponEmail: map.teleponEmail,
+        namaPimpinan: map.namaPimpinan,
+        jabatanPimpinan: map.jabatanPimpinan,
+        nipPimpinan: map.nipPimpinan,
+        kodeSuratPrefix: map.kodeSuratPrefix,
+        nomorUrutMulai: Number(map.nomorUrutMulai) || 1,
+        digitNomorUrut: Number(map.digitNomorUrut) || 3,
+        resetNomorMode: map.resetNomorMode || 'tahunan',
+        kunciNomorUrutUntukUser: map.kunciNomorUrutUntukUser === 'false' ? false : true,
+      },
+      security: security,
+    });
+  } catch (err) {
+    return jsonOut({ ok: false, error: err.message });
+  }
+}
+
+function doPost(e) {
+  try {
+    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (body.action === 'append' && body.entry) {
+      const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
+      if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
+      const d = body.entry;
+      sheet.appendRow([
+        d.idBA, d.tanggalInput, d.nomorBA, d.hari, d.tanggalTeks, d.bulanTeks,
+        d.tahun, d.pukulBA, d.lokasi, d.namaPetugas, "'" + d.nipPetugas, d.jabatanPetugas,
+        d.namaWajibBayar, "'" + (d.nikWajibBayar || '-'), "'" + (d.noHP || '-'),
+        d.alamatInstansi, d.jamGangguan, d.jenisLayanan, d.rincianLayanan,
+        d.nominalAngka, d.terbilang, d.kotaTTD, d.tanggalTTD,
+        d.ttdWajibBayar || '', d.ttdPetugas || '', 'Menunggu Validasi', '', '', '', '',
+        d.kodeBilling ? "'" + d.kodeBilling : '', d.kodeNtpn ? "'" + d.kodeNtpn : '',
+        d.buktiSetorUrl || '', d.buktiSetorNama || '',
+      ]);
+      return jsonOut({ ok: true });
+    }
+
+    if (body.action === 'saveBuktiSetor') {
+      const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
+      if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
+      const row = Number(body.rowNumber);
+      if (!row || row < 2) throw new Error('Nomor baris tidak valid.');
+
+      let fileUrl = body.buktiSetorUrl || '';
+      const fileName = body.buktiSetorNama || '';
+      if (body.fileBase64 && body.fileMimeType && fileName) {
+        const bytes = Utilities.base64Decode(body.fileBase64);
+        const blob = Utilities.newBlob(bytes, body.fileMimeType, fileName);
+        const folders = DriveApp.getFoldersByName(CONFIG.NAMA_FOLDER_DRIVE);
+        const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(CONFIG.NAMA_FOLDER_DRIVE);
+        const file = folder.createFile(blob);
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        fileUrl = file.getUrl();
+      }
+
+      sheet.getRange(row, 31, 1, 4).setValues([[
+        body.kodeBilling ? "'" + body.kodeBilling : '',
+        body.kodeNtpn ? "'" + body.kodeNtpn : '',
+        fileUrl,
+        fileName,
+      ]]);
+      return jsonOut({ ok: true, buktiSetorUrl: fileUrl });
+    }
+
+    if (body.action === 'delete') {
+      const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
+      if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
+      let targetRow = Number(body.rowNumber);
+      if (body.idBA && sheet.getLastRow() > 1) {
+        const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues();
+        for (let i = 0; i < ids.length; i++) {
+          if (String(ids[i][0]).trim() === String(body.idBA).trim()) {
+            targetRow = i + 2;
+            break;
+          }
+        }
+      }
+      if (!targetRow || targetRow < 2) throw new Error('Baris data tidak ditemukan.');
+      sheet.deleteRow(targetRow);
+      return jsonOut({ ok: true });
+    }
+
+    if (body.action === 'validate') {
+      const sheet = ss.getSheetByName(CONFIG.DATA_SHEET);
+      if (!sheet) throw new Error('Tab ' + CONFIG.DATA_SHEET + ' tidak ditemukan.');
+      const row = Number(body.rowNumber);
+      if (!row || row < 2) throw new Error('Nomor baris tidak valid.');
+      const status = body.status || 'Menunggu Validasi';
+      const today = status === 'Menunggu Validasi'
+        ? ''
+        : Utilities.formatDate(new Date(), 'Asia/Makassar', 'yyyy-MM-dd');
+      sheet.getRange(row, CONFIG.COL_STATUS, 1, 4).setValues([[
+        status,
+        body.validatorName || '',
+        today,
+        body.notes || '',
+      ]]);
+      return jsonOut({ ok: true });
+    }
+
+    if (body.action === 'saveSettings') {
+      let sSheet = ss.getSheetByName(CONFIG.SETTINGS_SHEET);
+      if (!sSheet) sSheet = ss.insertSheet(CONFIG.SETTINGS_SHEET);
+      const a = body.agency || {};
+      const sec = body.security || {};
+      const rows = [
+        ['Kunci_Pengaturan', 'Nilai'],
+        ['namaInstansi', a.namaInstansi || ''],
+        ['subUnit', a.subUnit || ''],
+        ['alamatInstansi', a.alamatInstansi || ''],
+        ['kota', a.kota || ''],
+        ['teleponEmail', a.teleponEmail || ''],
+        ['namaPimpinan', a.namaPimpinan || ''],
+        ['jabatanPimpinan', a.jabatanPimpinan || ''],
+        ['nipPimpinan', "'" + (a.nipPimpinan || '')],
+        ['kodeSuratPrefix', a.kodeSuratPrefix || ''],
+        ['nomorUrutMulai', String(a.nomorUrutMulai || 1)],
+        ['digitNomorUrut', String(a.digitNomorUrut || 3)],
+        ['resetNomorMode', a.resetNomorMode || 'tahunan'],
+        ['kunciNomorUrutUntukUser', a.kunciNomorUrutUntukUser === false ? 'false' : 'true'],
+        ['adminPwdSalt', (sec.admin && sec.admin.salt) || ''],
+        ['adminPwdHash', (sec.admin && sec.admin.hash) || ''],
+        ['adminPwdUpdatedAt', (sec.admin && sec.admin.updatedAt) || ''],
+        ['superAdminPwdSalt', (sec.superadmin && sec.superadmin.salt) || ''],
+        ['superAdminPwdHash', (sec.superadmin && sec.superadmin.hash) || ''],
+        ['superAdminPwdUpdatedAt', (sec.superadmin && sec.superadmin.updatedAt) || ''],
+      ];
+      sSheet.getRange(1, 1, rows.length, 2).setValues(rows);
+      return jsonOut({ ok: true });
+    }
+
+    throw new Error('Aksi tidak dikenali.');
+  } catch (err) {
+    return jsonOut({ ok: false, error: err.message });
+  }
+}
 
 function onOpen() {
   SpreadsheetApp.getUi()

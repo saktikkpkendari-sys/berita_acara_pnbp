@@ -8,15 +8,19 @@ import {
   X,
 } from 'lucide-react';
 import { AgencySettings, BeritaAcaraPNBP } from '../types';
+import { parseGangguanInfo } from '../data/petugasList';
+import { DEFAULT_VALIDATOR_NAME } from '../services/googleSheets';
 import {
   formatAngka,
   formatTanggalIndo,
   generateBeritaAcaraPdf,
+  KOP_SURAT_IMAGE_URL,
 } from '../services/pdfGenerator';
 
 interface BeritaAcaraPreviewModalProps {
   entry: BeritaAcaraPNBP | null;
   agency: AgencySettings;
+  canSaveToDrive?: boolean;
   onClose: () => void;
   onRequestSaveToDrive: (
     entry: BeritaAcaraPNBP,
@@ -28,15 +32,17 @@ interface BeritaAcaraPreviewModalProps {
 export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = ({
   entry,
   agency,
+  canSaveToDrive = false,
   onClose,
   onRequestSaveToDrive,
 }) => {
   if (!entry) return null;
 
   const isValidated = entry.statusValidasi === 'Disetujui';
+  const gangguanInfo = parseGangguanInfo(entry.jamGangguan, entry.tanggalInput);
 
-  const handleDownloadPdf = () => {
-    const { blob, fileName } = generateBeritaAcaraPdf(entry, agency);
+  const handleDownloadPdf = async () => {
+    const { blob, fileName } = await generateBeritaAcaraPdf(entry, agency);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -45,8 +51,8 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
     URL.revokeObjectURL(url);
   };
 
-  const handleUploadDrive = () => {
-    const { blob, fileName } = generateBeritaAcaraPdf(entry, agency);
+  const handleUploadDrive = async () => {
+    const { blob, fileName } = await generateBeritaAcaraPdf(entry, agency);
     onRequestSaveToDrive(entry, blob, fileName);
   };
 
@@ -82,15 +88,17 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
                 PDF di Drive
               </a>
             )}
-            <button
-              type="button"
-              onClick={handleUploadDrive}
-              disabled={!isValidated}
-              className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <UploadCloud className="h-3.5 w-3.5" />
-              Simpan Drive
-            </button>
+            {canSaveToDrive && (
+              <button
+                type="button"
+                onClick={handleUploadDrive}
+                disabled={!isValidated}
+                className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <UploadCloud className="h-3.5 w-3.5" />
+                Simpan Drive
+              </button>
+            )}
             <button
               type="button"
               onClick={() => window.print()}
@@ -104,7 +112,7 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
               type="button"
               onClick={handleDownloadPdf}
               disabled={!isValidated}
-              className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg bg-[#0F766E] px-3.5 py-1.5 text-xs font-medium text-white hover:bg-[#0D5D57] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap shrink-0 rounded-lg bg-[#007376] px-3.5 py-1.5 text-xs font-medium text-white hover:bg-[#005a5d] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Download className="h-3.5 w-3.5" />
               Unduh PDF
@@ -123,20 +131,13 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
         {/* Printable A4 Sheet matching TEMPLATE_BA_a1b4f38c */}
         <div className="overflow-y-auto p-3 sm:p-8 print:overflow-visible print:p-0">
           <div className="print-only-sheet mx-auto max-w-[780px] border border-slate-300 bg-white p-6 text-slate-900 shadow-sm sm:p-12">
-            {/* Kop Surat */}
-            <div className="border-b-2 border-slate-900 pb-3 text-center">
-              <div className="font-display text-sm font-bold tracking-wide uppercase text-teal-800 sm:text-base">
-                {agency.namaInstansi}
-              </div>
-              <div className="text-xs font-bold uppercase text-slate-900 sm:text-sm">
-                {agency.subUnit}
-              </div>
-              <div className="mt-1 text-[11px] text-slate-600 sm:text-xs">
-                {agency.alamatInstansi}
-              </div>
-              <div className="text-[11px] text-slate-600 sm:text-xs">
-                {agency.teleponEmail}
-              </div>
+            {/* Kop Surat Resmi */}
+            <div className="border-b-2 border-slate-900 pb-2.5">
+              <img
+                src={KOP_SURAT_IMAGE_URL}
+                alt={`Kop Surat ${agency.subUnit}`}
+                className="mx-auto w-full h-auto object-contain"
+              />
             </div>
             <div className="mt-[2px] border-t border-slate-900" />
 
@@ -156,10 +157,9 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
                 Pada hari ini, <strong>{entry.hari}</strong>, tanggal{' '}
                 <strong>{entry.tanggalTeks}</strong> bulan{' '}
                 <strong>{entry.bulanTeks}</strong> tahun{' '}
-                <strong>{entry.tahun}</strong> pukul{' '}
-                <strong className="font-mono tabular-nums">{entry.pukulBA}</strong>{' '}
-                waktu setempat, bertempat di <strong>{entry.lokasi}</strong>,
-                kami yang bertanda tangan di bawah ini:
+                <strong>{entry.tahun}</strong>, bertempat di{' '}
+                <strong>{entry.lokasi}</strong>, kami yang bertanda tangan di
+                bawah ini:
               </p>
 
               {/* PIHAK PERTAMA */}
@@ -240,9 +240,12 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
               <ol className="list-decimal space-y-2.5 pl-5">
                 <li>
                   Telah terjadi gangguan teknis pada sistem layanan pembayaran
-                  elektronik sejak pukul{' '}
+                  elektronik pada hari <strong>{gangguanInfo.hari}</strong>,
+                  tanggal <strong>{gangguanInfo.tanggalTeks}</strong> bulan{' '}
+                  <strong>{gangguanInfo.bulanTeks}</strong> tahun{' '}
+                  <strong>{gangguanInfo.tahun}</strong> sejak pukul{' '}
                   <strong className="font-mono tabular-nums">
-                    {entry.jamGangguan}
+                    {gangguanInfo.jam}
                   </strong>{' '}
                   waktu setempat sehingga pembayaran non-tunai tidak dapat
                   diproses.
@@ -284,23 +287,23 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
                   </table>
                 </li>
                 <li>
-                  PIHAK PERTAMA berkewajiban menyimpan uang tunai tersebut dalam
-                  brankas bendahara dan segera membuatkan kode billing serta
-                  menyetorkannya ke Kas Negara melalui Bank/Pos Persepsi paling
-                  lambat 1 (satu) hari kerja setelah sistem kembali normal.
+                  PIHAK PERTAMA berkewajiban menyimpan uang tunai tersebut dan
+                  segera membuatkan kode billing serta menyetorkannya ke Kas
+                  Negara melalui Bank/Pos Persepsi paling lambat 1 (satu) hari
+                  kerja setelah sistem kembali normal.
                 </li>
                 <li>
                   Bukti Penerimaan Negara (BPN) / Nomor Transaksi Penerimaan
-                  Negara (NTPN) yang terbit setelah penyetoran akan diserahkan
-                  atau dikirimkan kepada PIHAK KEDUA sebagai bukti setor yang
-                  sah.
+                  Negara (NTPN) yang terbit setelah penyetoran akan disampaikan
+                  kepada Bendahara Penerimaan dan PIHAK KEDUA sebagai bukti
+                  setor yang sah.
                 </li>
               </ol>
 
               <p className="pt-1">
-                Demikian Berita Acara ini dibuat dengan sebenar-benarnya dalam
-                rangkap 2 (dua) untuk dipergunakan sebagaimana mestinya sebagai
-                bahan pertanggungjawaban administrasi dan keuangan.
+                Demikian Berita Acara ini dibuat dengan sebenar-benarnya untuk
+                dipergunakan sebagaimana mestinya sebagai bahan
+                pertanggungjawaban administrasi dan keuangan.
               </p>
 
               {/* Signature Block matching TEMPLATE_BA_a1b4f38c */}
@@ -359,11 +362,11 @@ export const BeritaAcaraPreviewModal: React.FC<BeritaAcaraPreviewModalProps> = (
               </div>
 
               {/* Validation Seal */}
-              <div className="mt-5 rounded-md border border-teal-700/35 bg-teal-50/70 px-3.5 py-2.5 text-[11px] text-slate-700">
-                <div className="flex items-center gap-1.5 font-semibold text-teal-800">
+              <div className="mt-5 rounded-md border border-[#007376]/35 bg-[#c7edec]/40 px-3.5 py-2.5 text-[11px] text-slate-700">
+                <div className="flex items-center gap-1.5 font-semibold text-[#007376]">
                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                  TERVALIDASI ADMIN: {entry.validatorAdmin || 'Admin'} ·
-                  Tanggal: {formatTanggalIndo(entry.tanggalValidasi)}
+                  TERVALIDASI: {entry.validatorAdmin || DEFAULT_VALIDATOR_NAME}{' '}
+                  · Tanggal: {formatTanggalIndo(entry.tanggalValidasi)}
                 </div>
                 {entry.catatanAdmin && (
                   <div className="mt-0.5 text-slate-600">

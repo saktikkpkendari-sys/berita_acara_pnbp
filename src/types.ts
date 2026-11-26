@@ -39,7 +39,13 @@ export interface BeritaAcaraPNBP {
   tanggalValidasi: string;
   catatanAdmin: string;
   linkPdfBA: string;
+  kodeBilling: string;
+  kodeNtpn: string;
+  buktiSetorUrl: string;
+  buktiSetorNama: string;
 }
+
+export type SequenceResetMode = 'tahunan' | 'bulanan' | 'lanjut';
 
 export interface AgencySettings {
   namaInstansi: string;
@@ -51,6 +57,10 @@ export interface AgencySettings {
   jabatanPimpinan: string;
   nipPimpinan: string;
   kodeSuratPrefix: string;
+  nomorUrutMulai: number;
+  digitNomorUrut: number;
+  resetNomorMode: SequenceResetMode;
+  kunciNomorUrutUntukUser: boolean;
 }
 
 export interface SpreadsheetInfo {
@@ -61,7 +71,20 @@ export interface SpreadsheetInfo {
   activeDataSheet: string;
 }
 
-export type ActiveTab = 'buat' | 'cetak' | 'rekap';
+export type ActiveTab = 'buat' | 'cetak' | 'bukti' | 'rekap';
+
+export type StorageMode = 'google-sheet' | 'apps-script' | 'local';
+
+export interface RolePasswordCredential {
+  salt: string;
+  hash: string;
+  updatedAt: string;
+}
+
+export interface RoleSecurityConfig {
+  admin?: RolePasswordCredential;
+  superadmin?: RolePasswordCredential;
+}
 
 export interface PendingConfirmation {
   title: string;

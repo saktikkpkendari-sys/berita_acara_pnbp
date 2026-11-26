@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { BULAN_INDO } from '../data/petugasList';
+import { BULAN_INDO, parseGangguanInfo } from '../data/petugasList';
+import { DEFAULT_VALIDATOR_NAME } from './googleSheets';
 import { AgencySettings, BeritaAcaraPNBP } from '../types';
 
 export function formatRupiah(amount: number): string {
@@ -30,9 +31,56 @@ export function formatTanggalIndo(dateStr: string): string {
   return `${parsed.getDate()} ${BULAN_INDO[parsed.getMonth()]} ${parsed.getFullYear()}`;
 }
 
-function addKopSurat(doc: jsPDF, agency: AgencySettings): number {
+export const KOP_SURAT_IMAGE_URL = `${import.meta.env.BASE_URL}assets/aistudio/kop_2025_net_a4e1caa5.png`;
+
+let cachedKopDataUrl: string | null = null;
+
+export async function loadKopSuratDataUrl(): Promise<string | null> {
+  if (cachedKopDataUrl) return cachedKopDataUrl;
+  try {
+    const res = await fetch(KOP_SURAT_IMAGE_URL);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Gagal membaca gambar kop surat.'));
+      reader.readAsDataURL(blob);
+    });
+    if (dataUrl.startsWith('data:image/')) {
+      cachedKopDataUrl = dataUrl;
+      return cachedKopDataUrl;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function addKopSurat(
+  doc: jsPDF,
+  agency: AgencySettings,
+  kopDataUrl: string | null
+): number {
   const pageWidth = doc.internal.pageSize.getWidth();
   const centerX = pageWidth / 2;
+
+  if (kopDataUrl) {
+    try {
+      const imgW = pageWidth - 32; // 178mm
+      const imgH = imgW * (142 / 682); // Preserve exact 682x142 ratio (~37.06mm)
+      doc.addImage(kopDataUrl, 'PNG', 16, 10, imgW, imgH);
+      const lineY = 10 + imgH + 2;
+      doc.setDrawColor(15, 23, 42);
+      doc.setLineWidth(0.8);
+      doc.line(16, lineY, pageWidth - 16, lineY);
+      doc.setLineWidth(0.25);
+      doc.line(16, lineY + 1.5, pageWidth - 16, lineY + 1.5);
+      return lineY + 8;
+    } catch {
+      // Fallback to text kop if image embedding fails
+    }
+  }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
@@ -59,21 +107,22 @@ function addKopSurat(doc: jsPDF, agency: AgencySettings): number {
   return 44;
 }
 
-export function generateBeritaAcaraPdf(
+export async function generateBeritaAcaraPdf(
   entry: BeritaAcaraPNBP,
   agency: AgencySettings
-): { blob: Blob; fileName: string } {
+): Promise<{ blob: Blob; fileName: string }> {
   if (entry.statusValidasi !== 'Disetujui') {
     throw new Error('Berita Acara hanya dapat dicetak setelah divalidasi Admin.');
   }
 
+  const kopDataUrl = await loadKopSuratDataUrl();
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const centerX = pageWidth / 2;
   const leftM = 18;
   const contentW = pageWidth - 36;
 
-  let y = addKopSurat(doc, agency);
+  let y = addKopSurat(doc, agency, kopDataUrl);
 
   // Title matching TEMPLATE_BA_a1b4f38c
   doc.setFont('helvetica', 'bold');
@@ -91,7 +140,7 @@ export function generateBeritaAcaraPdf(
   doc.text(`Nomor: ${entry.nomorBA}`, centerX, y, { align: 'center' });
 
   y += 9;
-  const pembukaan = `Pada hari ini, ${entry.hari}, tanggal ${entry.tanggalTeks} bulan ${entry.bulanTeks} tahun ${entry.tahun} pukul ${entry.pukulBA} waktu setempat, bertempat di ${entry.lokasi}, kami yang bertanda tangan di bawah ini:`;
+  const pembukaan = `Pada hari ini, ${entry.hari}, tanggal ${entry.tanggalTeks} bulan ${entry.bulanTeks} tahun ${entry.tahun}, bertempat di ${entry.lokasi}, kami yang bertanda tangan di bawah ini:`;
   doc.setFontSize(9.8);
   doc.setTextColor(30, 41, 59);
   const splitOpening = doc.splitTextToSize(pembukaan, contentW);
@@ -160,7 +209,8 @@ export function generateBeritaAcaraPdf(
   doc.text('Dengan ini menerangkan hal-hal sebagai berikut:', leftM, y);
   y += 5.5;
 
-  const p1 = `1. Telah terjadi gangguan teknis pada sistem layanan pembayaran elektronik sejak pukul ${entry.jamGangguan} waktu setempat sehingga pembayaran non-tunai tidak dapat diproses.`;
+  const gangguan = parseGangguanInfo(entry.jamGangguan, entry.tanggalInput);
+  const p1 = `1. Telah terjadi gangguan teknis pada sistem layanan pembayaran elektronik pada hari ${gangguan.hari}, tanggal ${gangguan.tanggalTeks} bulan ${gangguan.bulanTeks} tahun ${gangguan.tahun} sejak pukul ${gangguan.jam} waktu setempat sehingga pembayaran non-tunai tidak dapat diproses.`;
   const splitP1 = doc.splitTextToSize(p1, contentW);
   doc.text(splitP1, leftM, y);
   y += splitP1.length * 4.5 + 2.5;
@@ -193,19 +243,19 @@ export function generateBeritaAcaraPdf(
       ?.finalY ?? y + 20) + 3.5;
 
   const p3 =
-    '3. PIHAK PERTAMA berkewajiban menyimpan uang tunai tersebut dalam brankas bendahara dan segera membuatkan kode billing serta menyetorkannya ke Kas Negara melalui Bank/Pos Persepsi paling lambat 1 (satu) hari kerja setelah sistem kembali normal.';
+    '3. PIHAK PERTAMA berkewajiban menyimpan uang tunai tersebut dan segera membuatkan kode billing serta menyetorkannya ke Kas Negara melalui Bank/Pos Persepsi paling lambat 1 (satu) hari kerja setelah sistem kembali normal.';
   const splitP3 = doc.splitTextToSize(p3, contentW);
   doc.text(splitP3, leftM, y);
   y += splitP3.length * 4.5 + 2.5;
 
   const p4 =
-    '4. Bukti Penerimaan Negara (BPN) / Nomor Transaksi Penerimaan Negara (NTPN) yang terbit setelah penyetoran akan diserahkan atau dikirimkan kepada PIHAK KEDUA sebagai bukti setor yang sah.';
+    '4. Bukti Penerimaan Negara (BPN) / Nomor Transaksi Penerimaan Negara (NTPN) yang terbit setelah penyetoran akan disampaikan kepada Bendahara Penerimaan dan PIHAK KEDUA sebagai bukti setor yang sah.';
   const splitP4 = doc.splitTextToSize(p4, contentW);
   doc.text(splitP4, leftM, y);
   y += splitP4.length * 4.5 + 4;
 
   const closing =
-    'Demikian Berita Acara ini dibuat dengan sebenar-benarnya dalam rangkap 2 (dua) untuk dipergunakan sebagaimana mestinya sebagai bahan pertanggungjawaban administrasi dan keuangan.';
+    'Demikian Berita Acara ini dibuat dengan sebenar-benarnya untuk dipergunakan sebagaimana mestinya sebagai bahan pertanggungjawaban administrasi dan keuangan.';
   const splitClosing = doc.splitTextToSize(closing, contentW);
   doc.text(splitClosing, leftM, y);
   y += splitClosing.length * 4.5 + 6;
@@ -266,14 +316,14 @@ export function generateBeritaAcaraPdf(
 
   // Compact validation audit footer
   const footerY = Math.min(nameY + 13, 282);
-  doc.setDrawColor(15, 118, 110);
-  doc.setFillColor(240, 253, 250);
+  doc.setDrawColor(0, 115, 118);
+  doc.setFillColor(199, 237, 235);
   doc.roundedRect(leftM, footerY, contentW, 10, 1, 1, 'FD');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  doc.setTextColor(15, 118, 110);
+  doc.setTextColor(0, 115, 118);
   doc.text(
-    `TERVALIDASI ADMIN: ${entry.validatorAdmin || 'Admin'} · Tanggal: ${formatTanggalIndo(entry.tanggalValidasi)} · ID: ${entry.idBA}`,
+    `TERVALIDASI: ${entry.validatorAdmin || DEFAULT_VALIDATOR_NAME} · Tanggal: ${formatTanggalIndo(entry.tanggalValidasi)} · ID: ${entry.idBA}`,
     leftM + 3,
     footerY + 6.2
   );
@@ -283,19 +333,40 @@ export function generateBeritaAcaraPdf(
   return { blob: doc.output('blob'), fileName };
 }
 
-export function generateMonthlyRecapPdf(
+export async function generateMonthlyRecapPdf(
   validatedEntries: BeritaAcaraPNBP[],
   month: number,
   year: number,
   agency: AgencySettings,
-  excludedCount: number
-): { blob: Blob; fileName: string } {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  _excludedCount: number
+): Promise<{ blob: Blob; fileName: string }> {
+  const kopDataUrl = await loadKopSuratDataUrl();
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const centerX = pageWidth / 2;
   const monthName = BULAN_INDO[month - 1] || String(month);
 
-  let y = addKopSurat(doc, agency);
+  // Use centered proportioned Kop Surat on landscape page
+  let y = 12;
+  if (kopDataUrl) {
+    try {
+      const imgW = 190;
+      const imgH = imgW * (142 / 682);
+      doc.addImage(kopDataUrl, 'PNG', centerX - imgW / 2, 8, imgW, imgH);
+      const lineY = 8 + imgH + 2;
+      doc.setDrawColor(0, 115, 118);
+      doc.setLineWidth(0.8);
+      doc.line(16, lineY, pageWidth - 16, lineY);
+      doc.setDrawColor(209, 219, 38);
+      doc.setLineWidth(0.5);
+      doc.line(16, lineY + 1.5, pageWidth - 16, lineY + 1.5);
+      y = lineY + 8;
+    } catch {
+      y = addKopSurat(doc, agency, null);
+    }
+  } else {
+    y = addKopSurat(doc, agency, null);
+  }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
@@ -311,7 +382,7 @@ export function generateMonthlyRecapPdf(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(`Periode: ${monthName} ${year}`, centerX, y, { align: 'center' });
-  y += 8;
+  y += 7;
 
   const totalNominal = validatedEntries.reduce(
     (acc, item) => acc + item.nominalAngka,
@@ -320,79 +391,53 @@ export function generateMonthlyRecapPdf(
 
   autoTable(doc, {
     startY: y,
-    margin: { left: 18, right: 18 },
-    theme: 'grid',
-    styles: {
-      fontSize: 8.8,
-      cellPadding: 3,
-      textColor: [30, 41, 59],
-      lineColor: [203, 213, 225],
-    },
-    headStyles: {
-      fillColor: [240, 253, 250],
-      textColor: [15, 118, 110],
-      fontStyle: 'bold',
-    },
-    head: [
-      [
-        'Berita Acara Tervalidasi',
-        'Total PNBP Tunai Diterima',
-        'Belum Tervalidasi (Dikecualikan)',
-      ],
-    ],
-    body: [
-      [
-        `${validatedEntries.length} Dokumen`,
-        formatRupiah(totalNominal),
-        `${excludedCount} Entri`,
-      ],
-    ],
-  });
-
-  y =
-    ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
-      ?.finalY ?? y + 18) + 6;
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: 18, right: 18 },
+    margin: { left: 16, right: 16 },
     theme: 'grid',
     headStyles: {
-      fillColor: [15, 118, 110],
+      fillColor: [0, 115, 118],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8,
+      fontSize: 7.5,
     },
     styles: {
-      fontSize: 7.8,
-      cellPadding: 2.3,
+      fontSize: 7.2,
+      cellPadding: 2,
       textColor: [30, 41, 59],
-      lineColor: [203, 213, 225],
+      lineColor: [191, 191, 191],
     },
     columnStyles: {
       0: { cellWidth: 8, halign: 'center' },
-      1: { cellWidth: 21 },
-      2: { cellWidth: 33 },
-      3: { cellWidth: 40 },
+      1: { cellWidth: 22 },
+      2: { cellWidth: 36 },
+      3: { cellWidth: 48 },
       4: { cellWidth: 'auto' },
-      5: { cellWidth: 28, halign: 'right' },
+      5: { cellWidth: 28 },
+      6: { cellWidth: 28 },
+      7: { cellWidth: 28 },
+      8: { cellWidth: 28, halign: 'right' },
     },
     head: [
       [
         'No',
         'Tanggal',
         'Nomor BA',
-        'Petugas & Wajib Bayar',
+        'Petugas dan Pengguna Jasa',
         'Jenis Layanan PNBP',
-        'Nominal',
+        'Kode Billing',
+        'Kode NTPN',
+        'Bukti Setor',
+        'Nominal (Rp)',
       ],
     ],
     body: validatedEntries.map((item, idx) => [
       String(idx + 1),
       item.tanggalInput,
       item.nomorBA,
-      `Petugas: ${item.namaPetugas}\nWajib Bayar: ${item.namaWajibBayar}`,
+      `Petugas: ${item.namaPetugas}\nPengguna Jasa: ${item.namaWajibBayar}`,
       item.jenisLayanan,
+      item.kodeBilling || '-',
+      item.kodeNtpn || '-',
+      item.buktiSetorUrl ? item.buktiSetorNama || 'Terlampir' : '-',
       formatRupiah(item.nominalAngka),
     ]),
     foot: [
@@ -401,45 +446,53 @@ export function generateMonthlyRecapPdf(
         '',
         '',
         '',
-        'TOTAL PENERIMAAN PNBP TUNAI TERVALIDASI',
+        '',
+        '',
+        '',
+        'TOTAL PENERIMAAN',
         formatRupiah(totalNominal),
       ],
     ],
     footStyles: {
-      fillColor: [240, 253, 250],
-      textColor: [15, 118, 110],
+      fillColor: [199, 237, 235],
+      textColor: [0, 115, 118],
       fontStyle: 'bold',
-      fontSize: 8.3,
+      fontSize: 8,
     },
   });
 
   y =
     ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
-      ?.finalY ?? y + 35) + 11;
+      ?.finalY ?? y + 35) + 9;
 
-  if (y > 242) {
+  if (y > 165) {
     doc.addPage();
-    y = 24;
+    y = 20;
   }
 
-  doc.setFontSize(9.5);
+  doc.setFontSize(9.2);
   doc.setTextColor(30, 41, 59);
   const todayStr = formatTanggalIndo(new Date().toISOString().slice(0, 10));
   doc.text(`${agency.kota}, ${todayStr}`, pageWidth - 22, y, {
     align: 'right',
   });
-  doc.text('Mengetahui / Mengesahkan,', pageWidth - 22, y + 5.5, {
+  doc.text('Mengetahui / Mengesahkan,', pageWidth - 22, y + 5, {
     align: 'right',
   });
-  doc.text(agency.jabatanPimpinan, pageWidth - 22, y + 10, {
+  const jabatanLines = doc.splitTextToSize(
+    agency.jabatanPimpinan || '',
+    95
+  ) as string[];
+  doc.text(jabatanLines, pageWidth - 22, y + 9.5, {
     align: 'right',
   });
 
+  const sigNameY = y + 9.5 + jabatanLines.length * 4.5 + 12;
   doc.setFont('helvetica', 'bold');
-  doc.text(agency.namaPimpinan, pageWidth - 22, y + 28, { align: 'right' });
+  doc.text(agency.namaPimpinan, pageWidth - 22, sigNameY, { align: 'right' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  doc.text(`NIP. ${agency.nipPimpinan}`, pageWidth - 22, y + 32.5, {
+  doc.text(`NIP. ${agency.nipPimpinan}`, pageWidth - 22, sigNameY + 4.5, {
     align: 'right',
   });
 
