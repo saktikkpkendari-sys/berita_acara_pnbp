@@ -611,7 +611,9 @@ export async function fetchSheetEntries(
       ttdWajibBayar: String(r[23] || ''),
       ttdPetugas: String(r[24] || ''),
       statusValidasi: normalizeStatus(r[25]),
-      validatorAdmin: String(r[26] || ''),
+      validatorAdmin: /saktikkpkendari|@/i.test(String(r[26] || ''))
+        ? DEFAULT_VALIDATOR_NAME
+        : String(r[26] || ''),
       tanggalValidasi: String(r[27] || ''),
       catatanAdmin: String(r[28] || ''),
       linkPdfBA: String(r[29] || ''),

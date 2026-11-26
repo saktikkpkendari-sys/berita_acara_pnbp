@@ -17,7 +17,6 @@ import {
   UserRole,
   ValidationStatus,
 } from '../types';
-import { DEFAULT_VALIDATOR_NAME } from '../services/googleSheets';
 import { formatRupiah, generateBeritaAcaraPdf } from '../services/pdfGenerator';
 
 interface CetakBeritaAcaraViewProps {
@@ -469,12 +468,11 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                                 Disetujui
                               </div>
-                              <div className="mt-0.5 text-[11px] text-[#63625e]">
-                                {item.validatorAdmin || DEFAULT_VALIDATOR_NAME} ·{' '}
-                                <span className="font-mono tabular-nums">
+                              {item.tanggalValidasi && (
+                                <div className="mt-0.5 font-mono text-[11px] text-[#63625e] tabular-nums">
                                   {item.tanggalValidasi}
-                                </span>
-                              </div>
+                                </div>
+                              )}
                             </div>
                           ) : isRejected ? (
                             <div className="text-[#c00000]">

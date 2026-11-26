@@ -4,6 +4,7 @@ import {
   Download,
   FileCheck2,
   FileUp,
+  Lock,
   Receipt,
   Search,
 } from 'lucide-react';
@@ -90,7 +91,15 @@ export const InputBuktiSetorView: React.FC<InputBuktiSetorViewProps> = ({
     };
   }, [entries]);
 
+  const isSelectedComplete = Boolean(
+    selectedEntry &&
+      selectedEntry.kodeBilling?.trim() &&
+      selectedEntry.kodeNtpn?.trim() &&
+      selectedEntry.buktiSetorUrl
+  );
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isSelectedComplete) return;
     setFileError(null);
     const file = e.target.files?.[0] || null;
     if (!file) {
@@ -107,7 +116,7 @@ export const InputBuktiSetorView: React.FC<InputBuktiSetorViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEntry) return;
+    if (!selectedEntry || isSelectedComplete) return;
     setFileError(null);
 
     onSaveBuktiSetor(selectedEntry, {
@@ -295,10 +304,30 @@ export const InputBuktiSetorView: React.FC<InputBuktiSetorViewProps> = ({
                     <strong className="text-slate-800">{selectedEntry.namaWajibBayar}</strong>
                   </p>
                 </div>
-                <div className="font-mono text-base font-bold tabular-nums text-[#007376]">
-                  {formatRupiah(selectedEntry.nominalAngka)}
+                <div className="text-right">
+                  <div className="font-mono text-base font-bold tabular-nums text-[#007376]">
+                    {formatRupiah(selectedEntry.nominalAngka)}
+                  </div>
+                  <div
+                    className={`mt-0.5 text-[11px] font-semibold ${
+                      isSelectedComplete ? 'text-[#007376]' : 'text-[#e4872d]'
+                    }`}
+                  >
+                    {isSelectedComplete ? 'Status: Lengkap' : 'Status: Belum Lengkap'}
+                  </div>
                 </div>
               </div>
+
+              {isSelectedComplete && (
+                <div className="flex items-start gap-2.5 rounded-xl border border-[#10b1aa]/35 bg-[#c7edec]/40 px-3.5 py-2.5 text-xs text-[#007376]">
+                  <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    Bukti setor sudah berstatus <strong>Lengkap</strong>. Kolom
+                    Kode Billing, Kode NTPN, dan Unggah Dokumen dikunci agar
+                    tidak terjadi perubahan data.
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
@@ -308,10 +337,16 @@ export const InputBuktiSetorView: React.FC<InputBuktiSetorViewProps> = ({
                   <input
                     type="text"
                     required
+                    readOnly={isSelectedComplete}
+                    disabled={isSelectedComplete}
                     placeholder="Contoh: 820261126001234"
                     value={kodeBilling}
                     onChange={(e) => setKodeBilling(e.target.value)}
-                    className="mt-1.5 min-h-[44px] w-full rounded-xl border border-[#bfbfbf] px-3.5 py-2 font-mono text-sm text-slate-900 focus:border-[#007376] focus:outline-none"
+                    className={`mt-1.5 min-h-[44px] w-full rounded-xl border px-3.5 py-2 font-mono text-sm focus:outline-none ${
+                      isSelectedComplete
+                        ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600'
+                        : 'border-[#bfbfbf] bg-white text-slate-900 focus:border-[#007376]'
+                    }`}
                   />
                 </div>
 
@@ -322,38 +357,56 @@ export const InputBuktiSetorView: React.FC<InputBuktiSetorViewProps> = ({
                   <input
                     type="text"
                     required
+                    readOnly={isSelectedComplete}
+                    disabled={isSelectedComplete}
                     placeholder="Contoh: 9F28A1C04B7D12E5"
                     value={kodeNtpn}
                     onChange={(e) => setKodeNtpn(e.target.value.toUpperCase())}
-                    className="mt-1.5 min-h-[44px] w-full rounded-xl border border-[#bfbfbf] px-3.5 py-2 font-mono text-sm uppercase text-slate-900 focus:border-[#007376] focus:outline-none"
+                    className={`mt-1.5 min-h-[44px] w-full rounded-xl border px-3.5 py-2 font-mono text-sm uppercase focus:outline-none ${
+                      isSelectedComplete
+                        ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-600'
+                        : 'border-[#bfbfbf] bg-white text-slate-900 focus:border-[#007376]'
+                    }`}
                   />
                 </div>
               </div>
 
-              {/* File Upload */}
+              {/* File Upload (Locked once status is Lengkap) */}
               <div>
                 <label className="block text-xs font-medium text-slate-700">
                   Upload Dokumen Bukti Setor (PDF / JPG / PNG, Maks. 2 MB)
                 </label>
-                <label className="mt-1.5 flex min-h-[112px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#10b1aa]/50 bg-[#c7edec]/20 px-4 py-4 text-center transition-colors hover:border-[#007376] hover:bg-[#c7edec]/35">
-                  <FileUp className="h-6 w-6 text-[#007376]" />
-                  <span className="mt-2 text-xs font-semibold text-[#007376]">
-                    {selectedFile
-                      ? selectedFile.name
-                      : 'Pilih file dokumen bukti setor dari perangkat'}
-                  </span>
-                  <span className="mt-0.5 text-[11px] text-[#63625e]">
-                    {selectedFile
-                      ? `${Math.round(selectedFile.size / 1024)} KB siap diunggah`
-                      : 'Mendukung format PDF, JPG, atau PNG'}
-                  </span>
-                  <input
-                    type="file"
-                    accept=".pdf,image/png,image/jpeg,image/webp"
-                    onChange={handleFileChange}
-                    className="sr-only"
-                  />
-                </label>
+                {isSelectedComplete ? (
+                  <div className="mt-1.5 flex min-h-[96px] cursor-not-allowed flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-100 px-4 py-4 text-center">
+                    <Lock className="h-5 w-5 text-slate-400" />
+                    <span className="mt-1.5 text-xs font-semibold text-slate-600">
+                      Menu Upload Dokumen Terkunci
+                    </span>
+                    <span className="mt-0.5 text-[11px] text-slate-500">
+                      Dokumen bukti setor telah tersimpan dan tidak dapat diubah
+                    </span>
+                  </div>
+                ) : (
+                  <label className="mt-1.5 flex min-h-[112px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#10b1aa]/50 bg-[#c7edec]/20 px-4 py-4 text-center transition-colors hover:border-[#007376] hover:bg-[#c7edec]/35">
+                    <FileUp className="h-6 w-6 text-[#007376]" />
+                    <span className="mt-2 text-xs font-semibold text-[#007376]">
+                      {selectedFile
+                        ? selectedFile.name
+                        : 'Pilih file dokumen bukti setor dari perangkat'}
+                    </span>
+                    <span className="mt-0.5 text-[11px] text-[#63625e]">
+                      {selectedFile
+                        ? `${Math.round(selectedFile.size / 1024)} KB siap diunggah`
+                        : 'Mendukung format PDF, JPG, atau PNG'}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,image/png,image/jpeg,image/webp"
+                      onChange={handleFileChange}
+                      className="sr-only"
+                    />
+                  </label>
+                )}
 
                 {selectedEntry.buktiSetorUrl && !selectedFile && (
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#10b1aa]/30 bg-[#c7edec]/25 px-3.5 py-2.5 text-xs">
@@ -397,16 +450,19 @@ export const InputBuktiSetorView: React.FC<InputBuktiSetorViewProps> = ({
 
               <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-[#63625e]">
-                  Data Billing, NTPN, dan tautan dokumen otomatis tersinkron ke
-                  menu Cetak Rekap Bulanan.
+                  {isSelectedComplete
+                    ? 'Bukti setor untuk Berita Acara ini telah lengkap dan otomatis masuk Cetak Rekap Bulanan.'
+                    : 'Data Billing, NTPN, dan tautan dokumen otomatis tersinkron ke menu Cetak Rekap Bulanan.'}
                 </p>
-                <button
-                  type="submit"
-                  className="inline-flex min-h-[44px] items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#007376] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#005a5d]"
-                >
-                  <FileCheck2 className="h-4 w-4" />
-                  Simpan Bukti Setor
-                </button>
+                {!isSelectedComplete && (
+                  <button
+                    type="submit"
+                    className="inline-flex min-h-[44px] items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#007376] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#005a5d]"
+                  >
+                    <FileCheck2 className="h-4 w-4" />
+                    SIMPAN Bukti Setor
+                  </button>
+                )}
               </div>
             </form>
           )}

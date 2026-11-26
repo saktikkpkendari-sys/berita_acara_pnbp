@@ -12,6 +12,10 @@
   .font-mono, code, pre {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
   }
+
+  .font-dynapuff {
+    font-family: 'DynaPuff', 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
 }
 
 .tabular-nums {

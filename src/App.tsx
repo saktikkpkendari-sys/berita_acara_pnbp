@@ -684,6 +684,11 @@ export default function App() {
       file: File | null;
     }
   ) => {
+    const alreadyComplete = Boolean(
+      entry.kodeBilling?.trim() && entry.kodeNtpn?.trim() && entry.buktiSetorUrl
+    );
+    if (alreadyComplete) return;
+
     const fileLabel = payload.file
       ? payload.file.name
       : entry.buktiSetorNama || 'Tidak ada lampiran';
@@ -926,43 +931,54 @@ export default function App() {
       <div className="no-print h-1 w-full bg-gradient-to-r from-[#007376] via-[#10b1aa] to-[#d1db26]" />
 
       {/* Top Bar (Adapted per User Role) */}
-      <header className="no-print sticky top-0 z-30 border-b border-[#10b1aa]/20 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4 sm:h-16 sm:px-6 lg:gap-6 lg:px-8">
-          {/* Zone 1: Brand wordmark + role badge */}
+      <header className="no-print sticky top-0 z-30 border-b border-[#10b1aa]/25 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:h-[74px] sm:px-6 lg:gap-5 lg:px-8">
+          {/* Zone 1: Brand Emblem + INTANKENDARI + DynaPuff Subtitle */}
           <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setActiveTab('buat')}
-              className="flex items-center gap-2.5 text-left whitespace-nowrap shrink-0"
+              className="group flex items-center gap-3 text-left min-w-0"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#007376] to-[#10b1aa] font-display text-xs font-bold text-white ring-2 ring-[#d1db26]/70">
-                BK
-              </span>
-              <span className="font-display text-sm font-bold tracking-tight text-slate-900 sm:text-base">
-                PNBP BKK Kendari
-              </span>
+              <div className="shrink-0 overflow-hidden rounded-xl bg-[#18645d] p-0.5 ring-2 ring-[#d1db26]/80 shadow-sm transition-transform group-hover:scale-[1.02]">
+                <img
+                  src={`${import.meta.env.BASE_URL}assets/aistudio/intan_kendari_Okee_cec79206.png`}
+                  alt="Logo INTANKENDARI"
+                  className="h-9 w-auto object-contain sm:h-11"
+                />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-sm font-extrabold tracking-tight text-[#007376] sm:text-base whitespace-nowrap">
+                    INTANKENDARI
+                  </span>
+                  <span
+                    className={`hidden xl:inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10.5px] font-semibold whitespace-nowrap ${
+                      role === 'superadmin'
+                        ? 'border-[#007376] bg-[#007376] text-white'
+                        : role === 'admin'
+                        ? 'border-[#10b1aa]/40 bg-[#c7edec]/60 text-[#007376]'
+                        : 'border-[#bfbfbf]/70 bg-slate-100 text-[#63625e]'
+                    }`}
+                  >
+                    {role === 'user' ? (
+                      <UserIcon className="h-3 w-3" />
+                    ) : (
+                      <ShieldCheck className="h-3 w-3" />
+                    )}
+                    {ROLE_LABELS[role]}
+                  </span>
+                </div>
+                <p className="font-dynapuff mt-0.5 text-[9.5px] leading-tight text-[#0d948e] line-clamp-2 max-w-[170px] sm:max-w-[270px] sm:text-[10.5px]">
+                  INformasi TArif layanaN KEkarantinaan kesehataN kenDARI
+                </p>
+              </div>
             </button>
-            <span
-              className={`hidden sm:inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
-                role === 'superadmin'
-                  ? 'border-[#007376] bg-[#007376] text-white'
-                  : role === 'admin'
-                  ? 'border-[#10b1aa]/40 bg-[#c7edec]/60 text-[#007376]'
-                  : 'border-[#bfbfbf]/70 bg-slate-100 text-[#63625e]'
-              }`}
-            >
-              {role === 'user' ? (
-                <UserIcon className="h-3 w-3" />
-              ) : (
-                <ShieldCheck className="h-3 w-3" />
-              )}
-              {ROLE_LABELS[role]}
-            </span>
           </div>
 
           {/* Zone 2: 4 Concise Menu Links (Desktop) */}
           <nav
-            className="hidden lg:flex items-center gap-6 text-sm font-medium text-[#63625e]"
+            className="hidden lg:flex items-center gap-4 xl:gap-6 text-xs xl:text-sm font-medium text-[#63625e]"
             aria-label="Menu Utama"
           >
             {MENU_ITEMS.map((item) => {
@@ -974,7 +990,7 @@ export default function App() {
                   key={item.id}
                   type="button"
                   onClick={() => setActiveTab(item.id)}
-                  className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 border-b-2 py-5 transition-colors ${
+                  className={`inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 border-b-2 py-6 transition-colors ${
                     isActive
                       ? 'border-[#007376] font-semibold text-[#007376]'
                       : 'border-transparent hover:text-[#007376]'

@@ -30,6 +30,10 @@ interface CreateBeritaAcaraViewProps {
   onRequireAuthOrSheet: () => void;
 }
 
+const RequiredMark: React.FC = () => (
+  <span className="ml-1 font-bold italic text-[#c00000]">*Wajib diisi</span>
+);
+
 export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
   agency,
   entries,
@@ -62,19 +66,13 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
     setNomorBA(computedNumberInfo.formattedNomorBA);
   }, [computedNumberInfo.formattedNomorBA]);
 
-  const [tanggalGangguan, setTanggalGangguan] = useState<string>(tanggalInput);
-  const [jamGangguan, setJamGangguan] = useState<string>('08:30');
-  const [lokasi, setLokasi] = useState<string>(
-    'Pelayanan Terpadu BKK Kelas I Kendari'
-  );
+  const [tanggalGangguan, setTanggalGangguan] = useState<string>('');
+  const [jamGangguan, setJamGangguan] = useState<string>('');
+  const [lokasi, setLokasi] = useState<string>('');
 
   const [petugasSearch, setPetugasSearch] = useState<string>('');
-  const [selectedNamaPetugas, setSelectedNamaPetugas] = useState<string>(
-    REFERENSI_PETUGAS[0].nama
-  );
-  const [selectedNipPetugas, setSelectedNipPetugas] = useState<string>(
-    REFERENSI_PETUGAS[0].nip
-  );
+  const [selectedNamaPetugas, setSelectedNamaPetugas] = useState<string>('');
+  const [selectedNipPetugas, setSelectedNipPetugas] = useState<string>('');
   const [jabatanPetugas, setJabatanPetugas] = useState<string>(
     'Petugas Layanan Karantina Kesehatan'
   );
@@ -82,16 +80,16 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
   const [namaWajibBayar, setNamaWajibBayar] = useState<string>('');
   const [alamatInstansi, setAlamatInstansi] = useState<string>('');
 
-  const [jenisLayanan, setJenisLayanan] = useState<string>(
-    JENIS_LAYANAN_PNBP[0]
-  );
+  const [jenisLayanan, setJenisLayanan] = useState<string>('');
   const [rincianLayanan, setRincianLayanan] = useState<string>('');
-  const [nominalAngka, setNominalAngka] = useState<number>(305000);
-  const [kotaTTD, setKotaTTD] = useState<string>(agency.kota || 'Kendari');
+  const [nominalInput, setNominalInput] = useState<string>('');
+  const [kotaTTD, setKotaTTD] = useState<string>('');
 
   const [ttdWajibBayar, setTtdWajibBayar] = useState<string>('');
   const [ttdPetugas, setTtdPetugas] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
+
+  const nominalAngka = Number(nominalInput) || 0;
 
   const dateParts = useMemo(
     () => parseTanggalIndoParts(tanggalInput),
@@ -99,12 +97,12 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
   );
 
   const gangguanDateParts = useMemo(
-    () => parseTanggalIndoParts(tanggalGangguan),
+    () => (tanggalGangguan ? parseTanggalIndoParts(tanggalGangguan) : null),
     [tanggalGangguan]
   );
 
   const terbilangText = useMemo(
-    () => terbilangRupiah(nominalAngka),
+    () => (nominalAngka > 0 ? terbilangRupiah(nominalAngka) : '-'),
     [nominalAngka]
   );
 
@@ -118,12 +116,20 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
 
   const handleSelectNamaPetugas = (nama: string) => {
     setSelectedNamaPetugas(nama);
+    if (!nama) {
+      setSelectedNipPetugas('');
+      return;
+    }
     const found = REFERENSI_PETUGAS.find((p) => p.nama === nama);
     if (found) setSelectedNipPetugas(found.nip);
   };
 
   const handleSelectNipPetugas = (nip: string) => {
     setSelectedNipPetugas(nip);
+    if (!nip) {
+      setSelectedNamaPetugas('');
+      return;
+    }
     const found = REFERENSI_PETUGAS.find((p) => p.nip === nip);
     if (found) setSelectedNamaPetugas(found.nama);
   };
@@ -131,6 +137,24 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+
+    if (
+      !lokasi.trim() ||
+      !tanggalGangguan ||
+      !jamGangguan ||
+      !selectedNamaPetugas ||
+      !selectedNipPetugas ||
+      !namaWajibBayar.trim() ||
+      !alamatInstansi.trim() ||
+      !jenisLayanan ||
+      nominalAngka < 1000 ||
+      !kotaTTD.trim()
+    ) {
+      setFormError(
+        'Mohon lengkapi seluruh kolom bertanda *Wajib diisi sebelum menyimpan Berita Acara.'
+      );
+      return;
+    }
 
     if (!ttdWajibBayar || !ttdPetugas) {
       setFormError(
@@ -181,11 +205,12 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="font-display text-lg font-bold tracking-tight sm:text-xl">
-              Buat Berita Acara Pembayaran PNBP Tunai
+              Berita Acara Pembayaran Tunai PNBP - INTANKENDARI
             </h1>
             <p className="mt-1 text-xs text-[#c7edec] sm:text-sm">
-              Formulir lapangan BKK Kelas I Kendari · Dilengkapi tanda tangan
-              langsung dan otomatis terkirim untuk validasi Admin.
+              Digunakan khusus petugas pada kondisi Aplikasi SIMPONI dan atau
+              SINKARKES tidak dapat diakses untuk dilakukan Transaksi pembayaran
+              Elektronik
             </p>
           </div>
           <div className="shrink-0 font-mono text-xs font-semibold text-[#d1db26] tabular-nums">
@@ -235,6 +260,7 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           <div className="sm:col-span-2">
             <label className="block text-xs font-medium text-slate-700">
               Lokasi Pelaksanaan
+              <RequiredMark />
             </label>
             <input
               type="text"
@@ -248,6 +274,7 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           <div>
             <label className="block text-xs font-medium text-slate-700">
               Tanggal Gangguan Teknis
+              <RequiredMark />
             </label>
             <input
               type="date"
@@ -260,7 +287,8 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
 
           <div>
             <label className="block text-xs font-medium text-slate-700">
-              Jam Mulai Gangguan Sistem
+              Jam Gangguan Sistem
+              <RequiredMark />
             </label>
             <input
               type="time"
@@ -271,14 +299,21 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
             />
           </div>
         </div>
-        <p className="mt-3 text-xs text-slate-500">
-          Keterangan gangguan teknis: Hari{' '}
-          <strong>{gangguanDateParts.hari}</strong>, tanggal{' '}
-          <strong>{gangguanDateParts.tanggalTeks}</strong> bulan{' '}
-          <strong>{gangguanDateParts.bulanTeks}</strong> tahun{' '}
-          <strong>{gangguanDateParts.tahun}</strong> sejak pukul{' '}
-          <strong className="font-mono">{jamGangguan}</strong> waktu setempat.
-        </p>
+        {gangguanDateParts && jamGangguan ? (
+          <p className="mt-3 text-xs text-slate-500">
+            Keterangan gangguan teknis: Hari{' '}
+            <strong>{gangguanDateParts.hari}</strong>, tanggal{' '}
+            <strong>{gangguanDateParts.tanggalTeks}</strong> bulan{' '}
+            <strong>{gangguanDateParts.bulanTeks}</strong> tahun{' '}
+            <strong>{gangguanDateParts.tahun}</strong> sejak pukul{' '}
+            <strong className="font-mono">{jamGangguan}</strong> waktu setempat.
+          </p>
+        ) : (
+          <p className="mt-3 text-xs text-slate-400">
+            Keterangan gangguan teknis akan terbentuk setelah Tanggal Gangguan
+            Teknis dan Jam Gangguan Sistem diisi.
+          </p>
+        )}
       </section>
 
       {/* Section 2: PIHAK PERTAMA & PIHAK KEDUA */}
@@ -317,13 +352,16 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
                 className="block text-xs font-medium text-slate-700"
               >
                 Nama Lengkap Petugas (Referensi Resmi)
+                <RequiredMark />
               </label>
               <select
                 id="select-nama-petugas"
+                required
                 value={selectedNamaPetugas}
                 onChange={(e) => handleSelectNamaPetugas(e.target.value)}
                 className="mt-1.5 min-h-[44px] w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-teal-700 focus:outline-none"
               >
+                <option value="">-- Pilih Nama Lengkap Petugas --</option>
                 {filteredPetugas.map((p) => (
                   <option key={`${p.nip}-${p.nama}`} value={p.nama}>
                     {p.nama}
@@ -338,13 +376,16 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
                 className="block text-xs font-medium text-slate-700"
               >
                 NIP Petugas (Terisi Otomatis / Dropdown)
+                <RequiredMark />
               </label>
               <select
                 id="select-nip-petugas"
+                required
                 value={selectedNipPetugas}
                 onChange={(e) => handleSelectNipPetugas(e.target.value)}
                 className="mt-1.5 min-h-[44px] w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 font-mono text-sm tabular-nums text-slate-900 focus:border-teal-700 focus:outline-none"
               >
+                <option value="">-- Pilih / Terisi Otomatis NIP --</option>
                 {filteredPetugas.map((p) => (
                   <option key={`nip-${p.nip}-${p.nama}`} value={p.nip}>
                     {p.nip} — {p.nama}
@@ -378,11 +419,11 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
             <div>
               <label className="block text-xs font-medium text-slate-700">
                 Nama Lengkap Wajib Bayar
+                <RequiredMark />
               </label>
               <input
                 type="text"
                 required
-                placeholder="Contoh: H. Ahmad Fauzan"
                 value={namaWajibBayar}
                 onChange={(e) => setNamaWajibBayar(e.target.value)}
                 className="mt-1.5 min-h-[44px] w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm text-slate-900 focus:border-teal-700 focus:outline-none"
@@ -392,6 +433,7 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
             <div>
               <label className="block text-xs font-medium text-slate-700">
                 Alamat / Instansi Wajib Bayar
+                <RequiredMark />
               </label>
               <textarea
                 rows={3}
@@ -416,12 +458,15 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           <div>
             <label className="block text-xs font-medium text-slate-700">
               Jenis Layanan / PNBP
+              <RequiredMark />
             </label>
             <select
+              required
               value={jenisLayanan}
               onChange={(e) => setJenisLayanan(e.target.value)}
               className="mt-1.5 min-h-[44px] w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 focus:border-teal-700 focus:outline-none"
             >
+              <option value="">-- Pilih Jenis Layanan / PNBP --</option>
               {JENIS_LAYANAN_PNBP.map((item) => (
                 <option key={item} value={item}>
                   {item}
@@ -433,15 +478,16 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           <div>
             <label className="block text-xs font-medium text-slate-700">
               Nominal Diterima (Rp)
+              <RequiredMark />
             </label>
             <input
               type="number"
               inputMode="numeric"
               min={1000}
-              step={500}
+              step={1}
               required
-              value={nominalAngka}
-              onChange={(e) => setNominalAngka(Number(e.target.value) || 0)}
+              value={nominalInput}
+              onChange={(e) => setNominalInput(e.target.value)}
               className="mt-1.5 min-h-[44px] w-full rounded-xl border border-slate-300 px-3.5 py-2 font-mono text-base font-semibold tabular-nums text-teal-800 focus:border-teal-700 focus:outline-none"
             />
           </div>
@@ -463,7 +509,10 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           <div className="sm:col-span-2 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-3 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium text-teal-900">
-                Nominal: <strong className="font-mono">Rp {formatAngka(nominalAngka)},-</strong>
+                Nominal:{' '}
+                <strong className="font-mono">
+                  {nominalAngka > 0 ? `Rp ${formatAngka(nominalAngka)},-` : '-'}
+                </strong>
               </span>
               <span className="text-teal-800">
                 Terbilang: <strong>{terbilangText}</strong>
@@ -489,13 +538,14 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-slate-600 whitespace-nowrap">
               Kota TTD:
+              <RequiredMark />
             </label>
             <input
               type="text"
               required
               value={kotaTTD}
               onChange={(e) => setKotaTTD(e.target.value)}
-              className="min-h-[38px] w-32 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-900 focus:border-teal-700 focus:outline-none"
+              className="min-h-[38px] w-36 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-900 focus:border-teal-700 focus:outline-none"
             />
           </div>
         </div>
@@ -509,7 +559,11 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
           />
           <SignaturePad
             label="Tanda Tangan PIHAK PERTAMA (Petugas BKK Kendari)"
-            signerName={`${selectedNamaPetugas} (NIP. ${selectedNipPetugas})`}
+            signerName={
+              selectedNamaPetugas
+                ? `${selectedNamaPetugas} (NIP. ${selectedNipPetugas})`
+                : 'Belum dipilih'
+            }
             value={ttdPetugas}
             onChange={setTtdPetugas}
           />

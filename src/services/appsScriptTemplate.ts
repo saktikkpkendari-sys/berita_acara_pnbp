@@ -72,7 +72,7 @@ function doGet() {
           ttdWajibBayar: r[23] || '',
           ttdPetugas: r[24] || '',
           statusValidasi: r[25] || 'Menunggu Validasi',
-          validatorAdmin: r[26] || '',
+          validatorAdmin: /saktikkpkendari|@/i.test(String(r[26] || '')) ? 'Bendahara Penerimaan BKK Kelas I Kendari' : (r[26] || ''),
           tanggalValidasi: r[27] || '',
           catatanAdmin: r[28] || '',
           linkPdfBA: r[29] || '',
@@ -288,9 +288,9 @@ function validasiBarisAktif() {
   );
   if (konfirmasi !== ui.Button.YES) return;
 
-  const adminEmail = Session.getActiveUser().getEmail() || 'Admin';
+  const adminName = 'Bendahara Penerimaan BKK Kelas I Kendari';
   sheet.getRange(row, CONFIG.COL_STATUS).setValue('Disetujui');
-  sheet.getRange(row, CONFIG.COL_VALIDATOR).setValue(adminEmail);
+  sheet.getRange(row, CONFIG.COL_VALIDATOR).setValue(adminName);
   sheet.getRange(row, CONFIG.COL_TGL_VAL).setValue(
     Utilities.formatDate(new Date(), 'Asia/Makassar', 'yyyy-MM-dd')
   );
