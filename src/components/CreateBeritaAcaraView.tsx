@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, FileCheck2, Search } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileCheck2, Search } from 'lucide-react';
 import {
   JENIS_LAYANAN_PNBP,
   parseTanggalIndoParts,
@@ -541,19 +541,30 @@ export const CreateBeritaAcaraView: React.FC<CreateBeritaAcaraViewProps> = ({
         </div>
       )}
 
-      {/* Submit CTA */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Submit CTA & Back Button */}
+      <div className="space-y-3 pt-1">
         <p className="text-xs text-[#63625e]">
           Setelah dikirim, status awal adalah <strong>Menunggu Validasi</strong>{' '}
           dan baru dapat dicetak PDF setelah disetujui Admin.
         </p>
-        <button
-          type="submit"
-          className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#007376] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#005a5d] active:scale-[0.99] sm:w-auto"
-        >
-          <FileCheck2 className="h-4 w-4" />
-          Simpan Berita Acara
-        </button>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <a
+            href="https://intankendari.glide.page/dl/dd2dda"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#007376] bg-white px-6 py-3 text-sm font-semibold text-[#007376] shadow-sm transition-colors hover:bg-[#c7edec]/40 active:scale-[0.99] sm:w-auto"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            KEMBALI
+          </a>
+          <button
+            type="submit"
+            className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-[#007376] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#005a5d] active:scale-[0.99] sm:w-auto"
+          >
+            <FileCheck2 className="h-4 w-4" />
+            Simpan Berita Acara
+          </button>
+        </div>
       </div>
     </form>
   );
