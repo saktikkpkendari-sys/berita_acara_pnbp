@@ -3,6 +3,7 @@ import { User } from 'firebase/auth';
 import {
   CheckCircle2,
   Database,
+  FileDown,
   FilePlus2,
   FileText,
   KeyRound,
@@ -1001,7 +1002,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F4FAFA] text-slate-900">
+    <div className="min-h-screen bg-[#F4FAFA] text-slate-900 print:min-h-0 print:bg-white">
       {/* Kemenkes Top Accent Bar */}
       <div className="no-print h-1 w-full bg-gradient-to-r from-[#007376] via-[#10b1aa] to-[#d1db26]" />
 
@@ -1191,7 +1192,31 @@ export default function App() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`${import.meta.env.BASE_URL}Panduan_Form_Petugas_INTANKENDARI.pptx`}
+              download="Panduan_Form_Petugas_INTANKENDARI.pptx"
+              className={`inline-flex min-h-[30px] items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                role === 'superadmin'
+                  ? 'border border-white/30 bg-white/15 text-white hover:bg-white/25'
+                  : 'border border-[#007376]/30 bg-[#007376] text-white hover:bg-[#005e60]'
+              }`}
+            >
+              <FileDown className="h-3.5 w-3.5" />
+              <span>Panduan Form Petugas (PPT)</span>
+            </a>
+            <a
+              href={`${import.meta.env.BASE_URL}Panduan_Penggunaan_INTANKENDARI.pptx`}
+              download="Panduan_Penggunaan_INTANKENDARI.pptx"
+              className={`inline-flex min-h-[30px] items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                role === 'superadmin'
+                  ? 'border border-white/30 bg-white/15 text-white hover:bg-white/25'
+                  : 'border border-[#10b1aa]/40 bg-[#c7edec]/50 text-[#007376] hover:bg-[#c7edec]'
+              }`}
+            >
+              <FileDown className="h-3.5 w-3.5" />
+              <span>Panduan Semua Role (PPT)</span>
+            </a>
             {role === 'admin' && pendingCount > 0 && activeTab !== 'cetak' && (
               <button
                 type="button"
@@ -1252,7 +1277,11 @@ export default function App() {
       </div>
 
       {/* Main Content — Always accessible by anyone as User */}
-      <main className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
+      <main
+        className={`mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 ${
+          previewEntry ? 'print:hidden' : ''
+        }`}
+      >
         {activeTab === 'buat' && (
           <CreateBeritaAcaraView
             agency={agency}

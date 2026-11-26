@@ -28,9 +28,17 @@ export async function fetchViaAppsScript(bridgeUrl: string): Promise<{
   security: RoleSecurityConfig;
 }> {
   const sep = bridgeUrl.includes('?') ? '&' : '?';
-  const res = await fetch(`${bridgeUrl}${sep}action=list&t=${Date.now()}`, {
-    method: 'GET',
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${bridgeUrl}${sep}action=list&t=${Date.now()}`, {
+      method: 'GET',
+      redirect: 'follow',
+    });
+  } catch {
+    throw new Error(
+      'Gagal terhubung ke Google Apps Script (Failed to fetch). Pastikan URL Web App (/exec) di Menu Super Admin sudah terbaru, deployment diset "Siapa saja" (Anyone), dan koneksi internet aktif.'
+    );
+  }
   if (!res.ok) {
     throw new Error(`Gagal memuat data publik dari Google Sheet (${res.status}).`);
   }
@@ -53,13 +61,21 @@ async function postToAppsScript(
   bridgeUrl: string,
   payload: Record<string, unknown>
 ): Promise<BridgePostResponse> {
-  const res = await fetch(bridgeUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8',
-    },
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetch(bridgeUrl, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new Error(
+      'Gagal mengirim data ke Google Apps Script (Failed to fetch). Periksa koneksi internet serta pastikan URL Web App (/exec) valid dan akses diset "Siapa saja" (Anyone).'
+    );
+  }
   if (!res.ok) {
     throw new Error(`Gagal mengirim data ke Google Sheet (${res.status}).`);
   }

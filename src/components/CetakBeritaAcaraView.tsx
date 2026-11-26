@@ -328,7 +328,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                           className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#007376] px-3 text-xs font-semibold text-white hover:bg-[#005a5d]"
                         >
                           <Printer className="h-4 w-4" />
-                          Cetak
+                          Cetak A4
                         </button>
                         <button
                           type="button"
@@ -507,7 +507,7 @@ export const CetakBeritaAcaraView: React.FC<CetakBeritaAcaraViewProps> = ({
                                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#007376] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#005a5d]"
                                 >
                                   <Printer className="h-3.5 w-3.5" />
-                                  Cetak
+                                  Cetak A4
                                 </button>
                                 <button
                                   type="button"

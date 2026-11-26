@@ -6,6 +6,7 @@ import {
   Printer,
   Trash2,
   UploadCloud,
+  X,
 } from 'lucide-react';
 import { BULAN_INDO } from '../data/petugasList';
 import { AgencySettings, BeritaAcaraPNBP, UserRole } from '../types';
@@ -14,6 +15,7 @@ import {
   formatTanggalIndo,
   generateMonthlyRecapPdf,
   KOP_SURAT_IMAGE_URL,
+  triggerPrintA4,
 } from '../services/pdfGenerator';
 
 interface MonthlyRecapViewProps {
@@ -42,6 +44,8 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
+  const [printingA4, setPrintingA4] = useState(false);
+  const [printNotice, setPrintNotice] = useState<string | null>(null);
 
   const yearOptions = useMemo(() => {
     const years = new Set<number>([now.getFullYear(), now.getFullYear() - 1]);
@@ -101,6 +105,31 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
       fileName,
       `${validatedEntries.length} Berita Acara PNBP tervalidasi periode ${monthLabel} ${selectedYear}`
     );
+  };
+
+  const handlePrintA4 = async () => {
+    if (validatedEntries.length === 0 || printingA4) return;
+    setPrintingA4(true);
+    setPrintNotice(null);
+    try {
+      const result = await triggerPrintA4(() =>
+        generateMonthlyRecapPdf(
+          validatedEntries,
+          selectedMonth,
+          selectedYear,
+          agency,
+          excludedCount,
+          { autoPrint: true }
+        )
+      );
+      if (result === 'fallback-pdf') {
+        setPrintNotice(
+          'Mode pratinjau/iframe membatasi dialog cetak langsung browser. File PDF Rekap Siap Cetak A4 telah diunduh otomatis — buka file tersebut untuk langsung mencetak (Ctrl+P).'
+        );
+      }
+    } finally {
+      setPrintingA4(false);
+    }
   };
 
   return (
@@ -165,12 +194,12 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
           )}
           <button
             type="button"
-            onClick={() => window.print()}
-            disabled={validatedEntries.length === 0}
-            className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#bfbfbf] bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-[#c7edec]/30 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none sm:text-sm"
+            onClick={handlePrintA4}
+            disabled={validatedEntries.length === 0 || printingA4}
+            className="inline-flex min-h-[44px] flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#007376]/40 bg-[#c7edec]/35 px-4 py-2 text-xs font-semibold text-[#007376] transition-colors hover:bg-[#c7edec]/65 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none sm:text-sm"
           >
             <Printer className="h-4 w-4" />
-            Cetak A4
+            {printingA4 ? 'Menyiapkan Cetak...' : 'Cetak A4'}
           </button>
           <button
             type="button"
@@ -183,6 +212,23 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
           </button>
         </div>
       </div>
+
+      {printNotice && (
+        <div className="no-print flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 sm:text-sm">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <span>{printNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPrintNotice(null)}
+            className="text-amber-700 hover:text-amber-950"
+            aria-label="Tutup info cetak"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Warning if unvalidated rows exist */}
       {excludedCount > 0 && (
@@ -203,11 +249,11 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
       {/* Printable A4 Recap Document */}
       <div className="print-only-sheet rounded-2xl border border-[#bfbfbf]/60 bg-white p-5 shadow-sm sm:p-8 print:p-0">
         {/* Kop Surat Resmi */}
-        <div className="border-b-2 border-[#007376] pb-2.5">
+        <div className="border-b-2 border-[#007376] pb-2.5 print:pb-1.5">
           <img
             src={KOP_SURAT_IMAGE_URL}
             alt={`Kop Surat ${agency.subUnit}`}
-            className="mx-auto w-full h-auto object-contain"
+            className="mx-auto h-auto w-full object-contain print:max-h-[26mm] print:w-auto print:max-w-full"
           />
         </div>
         <div className="mt-[2px] border-t-2 border-[#d1db26]" />
@@ -236,34 +282,34 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
           </div>
         ) : (
           <div className="mt-5 overflow-x-auto">
-            <table className="w-full border-collapse border border-[#bfbfbf] text-xs">
+            <table className="w-full border-collapse border border-[#bfbfbf] text-xs print:text-[9px]">
               <thead>
                 <tr className="bg-[#007376] text-white">
                   <th className="w-9 border border-[#bfbfbf]/60 px-2 py-2.5 text-center">
                     No
                   </th>
-                  <th className="w-24 border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="w-24 border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Tanggal
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Nomor BA
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Petugas dan Pengguna Jasa
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Jenis Layanan PNBP
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Kode Billing
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Kode NTPN
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-left">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Dokumen Bukti Setor
                   </th>
-                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-right">
+                  <th className="border border-[#bfbfbf]/60 px-2.5 py-2.5 text-center">
                     Nominal (Rp)
                   </th>
                   {isSuperAdmin && (
@@ -373,7 +419,7 @@ export const MonthlyRecapView: React.FC<MonthlyRecapViewProps> = ({
         )}
 
         {/* Signature Footer */}
-        <div className="mt-8 flex justify-end text-xs text-slate-800">
+        <div className="mt-8 flex justify-end text-xs text-slate-800 print:mt-5 break-inside-avoid">
           <div className="w-72 text-center">
             <p>
               {agency.kota},{' '}
